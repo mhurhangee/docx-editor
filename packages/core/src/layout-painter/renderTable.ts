@@ -191,9 +191,7 @@ function renderCellContent(
   const contentEl = doc.createElement('div');
   contentEl.className = TABLE_CLASS_NAMES.cellContent;
   contentEl.style.position = 'relative';
-  // Content width must account for cell padding since the cell uses border-box sizing.
-  // Without this, content is wider than the available area, causing centering and
-  // clipping issues (especially for nested tables).
+  // Cell uses border-box sizing, so content width must subtract padding.
   const padLeft = cell.padding?.left ?? 7;
   const padRight = cell.padding?.right ?? 7;
   const contentWidth = Math.max(0, cellMeasure.width - padLeft - padRight);
@@ -268,6 +266,7 @@ function renderCellContent(
   }
 
   let cumulativeY = 0;
+  let previousParagraphAfter = 0;
   for (let i = 0; i < cell.blocks.length; i++) {
     const block = cell.blocks[i];
     const measure = cellMeasure.blocks[i];
@@ -275,6 +274,9 @@ function renderCellContent(
     if (block?.kind === 'paragraph' && measure?.kind === 'paragraph') {
       const paragraphBlock = block as ParagraphBlock;
       let paragraphMeasure = measure as ParagraphMeasure;
+      const spacing = paragraphBlock.attrs?.spacing;
+      const effectiveSpaceBefore = Math.max(previousParagraphAfter, spacing?.before ?? 0);
+      cumulativeY += effectiveSpaceBefore;
 
       // Re-measure with floating zones if floating images exist in this cell
       if (floatingZones && floatingZones.length > 0) {
@@ -308,20 +310,33 @@ function renderCellContent(
       );
 
       fragEl.style.position = 'relative';
+      if (effectiveSpaceBefore > 0) {
+        fragEl.style.marginTop = `${effectiveSpaceBefore}px`;
+      }
       contentEl.appendChild(fragEl);
       cumulativeY += paragraphMeasure.totalHeight;
+      previousParagraphAfter = spacing?.after ?? 0;
     } else if (block?.kind === 'table' && measure?.kind === 'table') {
       // Nested table - render in normal document flow.
       // Avoid cumulative marginTop offsets here: cell content already flows vertically,
       // and compounding offsets can produce enormous heights on deeply nested tables.
       const tableBlock = block as TableBlock;
       const tableMeasure = measure as TableMeasure;
+      const effectiveSpaceBefore = previousParagraphAfter;
 
       const nestedTableEl = renderNestedTable(tableBlock, tableMeasure, context, doc);
       nestedTableEl.style.position = 'relative';
+      if (effectiveSpaceBefore > 0) {
+        nestedTableEl.style.marginTop = `${effectiveSpaceBefore}px`;
+      }
       contentEl.appendChild(nestedTableEl);
-      cumulativeY += (measure as TableMeasure).totalHeight ?? 0;
+      cumulativeY += effectiveSpaceBefore + ((measure as TableMeasure).totalHeight ?? 0);
+      previousParagraphAfter = 0;
     }
+  }
+
+  if (previousParagraphAfter > 0) {
+    contentEl.style.paddingBottom = `${previousParagraphAfter}px`;
   }
 
   return contentEl;

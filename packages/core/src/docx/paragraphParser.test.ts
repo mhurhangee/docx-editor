@@ -85,3 +85,45 @@ describe('parseParagraph tracked-change hardening', () => {
     expect(insertion.info.date).toBeUndefined();
   });
 });
+
+describe('parseParagraph rendered page break markers', () => {
+  test('marks a paragraph when Word rendered-page-break appears before visible text', () => {
+    const paragraph = parseParagraphXml(`
+      <w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+        <w:proofErr w:type="spellStart"/>
+        <w:r>
+          <w:lastRenderedPageBreak/>
+          <w:t>Moved to next page</w:t>
+        </w:r>
+      </w:p>
+    `);
+
+    expect(paragraph.renderedPageBreakBefore).toBe(true);
+  });
+
+  test('marks a paragraph when a page break appears before visible text', () => {
+    const paragraph = parseParagraphXml(`
+      <w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+        <w:r>
+          <w:br w:type="page"/>
+          <w:t>After hard break</w:t>
+        </w:r>
+      </w:p>
+    `);
+
+    expect(paragraph.renderedPageBreakBefore).toBe(true);
+  });
+
+  test('does not mark a paragraph when rendered page break follows visible text', () => {
+    const paragraph = parseParagraphXml(`
+      <w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+        <w:r>
+          <w:t>Previous page text</w:t>
+          <w:lastRenderedPageBreak/>
+        </w:r>
+      </w:p>
+    `);
+
+    expect(paragraph.renderedPageBreakBefore).toBeUndefined();
+  });
+});

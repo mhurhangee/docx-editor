@@ -178,6 +178,12 @@ function parseHeaderFooterContent(
   // Get all child elements
   const elements = root.elements ?? [];
 
+  // Headers and footers reflow per page, so the body-flow concept of a
+  // rendered-page-break marker has no meaning. The flag propagates through
+  // parseTable → parseTableCell → parseParagraph so even nested cell
+  // paragraphs skip the detection.
+  const opts = { inHeaderFooter: true };
+
   for (const el of elements) {
     if (el.type !== 'element') continue;
 
@@ -185,12 +191,11 @@ function parseHeaderFooterContent(
 
     // Parse paragraphs
     if (name === 'w:p' || name.endsWith(':p')) {
-      const paragraph = parseParagraph(el, styles, theme, numbering, rels, media);
-      content.push(paragraph);
+      content.push(parseParagraph(el, styles, theme, numbering, rels, media, opts));
     }
     // Parse tables
     else if (name === 'w:tbl' || name.endsWith(':tbl')) {
-      const table = parseTable(el, styles, theme, numbering, rels, media);
+      const table = parseTable(el, styles, theme, numbering, rels, media, opts);
       content.push(table);
     }
     // SDT (structured document tags) can contain paragraphs/tables

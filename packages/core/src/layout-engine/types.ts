@@ -293,6 +293,10 @@ export type TableCell = {
   colSpan?: number;
   rowSpan?: number;
   width?: number;
+  /** Original DOCX cell width value, before unit conversion. */
+  widthValue?: number;
+  /** Original DOCX cell width type ('auto', 'pct', 'dxa', 'nil'). */
+  widthType?: string;
   verticalAlign?: 'top' | 'center' | 'bottom';
   background?: string;
   borders?: CellBorders;
@@ -780,10 +784,14 @@ export type FootnoteContent = {
  * Options for the layout engine.
  */
 export type LayoutOptions = {
-  /** Default page size. */
+  /** Initial page size. */
   pageSize: { w: number; h: number };
-  /** Default page margins. */
+  /** Initial page margins. */
   margins: PageMargins;
+  /** Body-level (final section) page size, used after the last explicit section break. */
+  finalPageSize?: { w: number; h: number };
+  /** Body-level (final section) margins, used after the last explicit section break. */
+  finalMargins?: PageMargins;
   /** Column configuration. */
   columns?: ColumnLayout;
   /** Gap between rendered pages (for UI). */

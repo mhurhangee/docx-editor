@@ -372,6 +372,9 @@ function paragraphFormattingToAttrs(
       attrs.sectionBreakType = st;
     }
   }
+  if (paragraph.renderedPageBreakBefore) {
+    attrs.renderedPageBreakBefore = true;
+  }
 
   return attrs;
 }
@@ -543,7 +546,11 @@ function convertTable(
 
   // Resolve table borders: prefer table's own borders, fall back to table style's borders
   const tableStyle = tableStyleId ? styleResolver?.getStyle(tableStyleId) : undefined;
-  const resolvedTableBorders = table.formatting?.borders ?? tableStyle?.tblPr?.borders;
+  const implicitTableGridStyle = !tableStyleId ? styleResolver?.getStyle('TableGrid') : undefined;
+  const resolvedTableBorders =
+    table.formatting?.borders ??
+    tableStyle?.tblPr?.borders ??
+    implicitTableGridStyle?.tblPr?.borders;
 
   // Resolve default cell margins: table's own cellMargins > table style's cellMargins
   const tableCellMargins =
@@ -593,8 +600,12 @@ function convertTable(
   const totalRows = table.rows.length;
   const totalColumns =
     columnWidths?.length ??
-    table.rows[0]?.cells.reduce((sum, cell) => sum + (cell.formatting?.gridSpan ?? 1), 0) ??
-    0;
+    Math.max(
+      0,
+      ...table.rows.map((row) =>
+        row.cells.reduce((sum, cell) => sum + (cell.formatting?.gridSpan ?? 1), 0)
+      )
+    );
   const rows = table.rows.map((row, rowIndex) => {
     // Conditional formatting flag: firstRow in tblLook means "apply first-row styling"
     const isFirstRowStyled = rowIndex === 0 && !!look?.firstRow;
@@ -878,7 +889,8 @@ function convertTableCell(
   // Use the pre-calculated rowSpan from vMerge analysis
   const rowspan = calculatedRowSpan ?? 1;
 
-  // Determine width: prefer cell's own width, fall back to grid width
+  // Determine width: prefer cell's own width, fall back to grid width.
+  // Non-positive values fall through; resolveTableWidthPx maps them to undefined.
   let width = formatting?.width?.value;
   let widthType = formatting?.width?.type;
 
@@ -1763,17 +1775,68 @@ export function headerFooterToProseDoc(
 }
 
 /**
- * Check if a paragraph contains a page break in any of its runs
+ * Returns true when `<w:br w:type="page"/>` appears INSIDE a paragraph after
+ * some visible content. A page break that is the very first run content is
+ * already handled by `renderedPageBreakBefore` on the paragraph attrs.
  */
 function paragraphHasPageBreak(paragraph: Paragraph): boolean {
-  for (const item of paragraph.content) {
-    if (item.type === 'run') {
-      for (const content of (item as Run).content) {
-        if (content.type === 'break' && content.breakType === 'page') {
-          return true;
-        }
-      }
+  let sawVisibleContent = false;
+
+  function visitRunContent(content: RunContent): boolean {
+    if (content.type === 'break') {
+      if (content.breakType === 'page') return sawVisibleContent;
+      sawVisibleContent = true;
+      return false;
     }
+    if (
+      (content.type === 'text' && content.text.length > 0) ||
+      content.type === 'tab' ||
+      content.type === 'drawing' ||
+      content.type === 'shape' ||
+      content.type === 'symbol' ||
+      content.type === 'fieldChar' ||
+      content.type === 'instrText' ||
+      content.type === 'footnoteRef' ||
+      content.type === 'endnoteRef'
+    ) {
+      sawVisibleContent = true;
+    }
+    return false;
+  }
+
+  function visit(item: Paragraph['content'][number]): boolean {
+    if (item.type === 'run') {
+      for (const c of (item as Run).content) {
+        if (visitRunContent(c)) return true;
+      }
+      return false;
+    }
+    if (item.type === 'hyperlink') {
+      for (const r of (item as Hyperlink).children) {
+        if (r.type === 'run' && visit(r)) return true;
+      }
+      return false;
+    }
+    if (item.type === 'insertion' || item.type === 'deletion') {
+      // Tracked-change wrappers can themselves contain a page break.
+      // Descend so a break inside <w:ins> or <w:del> still emits a
+      // pageBreak node downstream.
+      const tc = item as { content: Paragraph['content'] };
+      for (const inner of tc.content) {
+        if (visit(inner)) return true;
+      }
+      return false;
+    }
+    if (item.type === 'simpleField' || item.type === 'complexField') {
+      // Field result (page number, date, etc.) is visible content.
+      sawVisibleContent = true;
+      return false;
+    }
+    return false;
+  }
+
+  for (const item of paragraph.content) {
+    if (visit(item)) return true;
   }
   return false;
 }

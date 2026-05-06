@@ -152,6 +152,12 @@ function convertPMParagraph(node: PMNode, documentCounts?: TrackedChangeCounts):
     content,
   };
 
+  // Preserve `<w:lastRenderedPageBreak/>` so a save+reload doesn't silently
+  // drop the break Word recorded for paginating this paragraph.
+  if (attrs.renderedPageBreakBefore) {
+    paragraph.renderedPageBreakBefore = true;
+  }
+
   // Restore full section properties (round-trip) or fallback to break type only
   if (attrs._sectionProperties) {
     paragraph.sectionProperties =

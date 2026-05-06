@@ -50,6 +50,57 @@ const DEFAULT_MARGINS: PageMargins = {
 };
 
 /**
+ * Page-flow geometry resolved from a single section's properties.
+ * Exported so the React paged editor can reuse the same shape when
+ * measuring blocks per section width — keeping pagination and
+ * measurement consistent.
+ */
+export type SectionLayoutConfig = {
+  pageSize: { w: number; h: number };
+  margins: PageMargins;
+  /** Optional. Sections without explicit columns inherit `{ count: 1 }`. */
+  columns?: ColumnLayout;
+};
+
+const DEFAULT_COLUMNS: ColumnLayout = { count: 1, gap: 0 };
+
+/**
+ * Walk `blocks` once and collect per-section geometry. `configs` has one
+ * entry per section break plus a trailing `finalConfig`. `breakIndices` is
+ * 1-to-1 with the inner break entries (same length as `configs.length - 1`).
+ * Callers that need the break `type` can read it from
+ * `(blocks[breakIndices[i]] as SectionBreakBlock).type`.
+ *
+ * @internal
+ */
+export function collectSectionConfigs(
+  blocks: FlowBlock[],
+  initialConfig: SectionLayoutConfig,
+  finalConfig: SectionLayoutConfig
+): {
+  configs: SectionLayoutConfig[];
+  breakIndices: number[];
+} {
+  const configs: SectionLayoutConfig[] = [];
+  const breakIndices: number[] = [];
+  let previousConfig = initialConfig;
+  for (let i = 0; i < blocks.length; i++) {
+    if (blocks[i].kind !== 'sectionBreak') continue;
+    const sb = blocks[i] as SectionBreakBlock;
+    const config: SectionLayoutConfig = {
+      pageSize: sb.pageSize ?? previousConfig.pageSize,
+      margins: sb.margins ?? previousConfig.margins,
+      columns: sb.columns,
+    };
+    configs.push(config);
+    breakIndices.push(i);
+    previousConfig = config;
+  }
+  configs.push(finalConfig);
+  return { configs, breakIndices };
+}
+
+/**
  * Get spacing before a paragraph block.
  */
 function getSpacingBefore(block: ParagraphBlock): number {
@@ -142,6 +193,8 @@ export function layoutDocument(
   void options.evenAndOddHeaders;
 
   const margins = { ...baseMargins };
+  const finalPageSize = options.finalPageSize ?? pageSize;
+  const finalMargins = options.finalMargins ?? margins;
 
   // Calculate content width
   const contentWidth = pageSize.w - margins.left - margins.right;
@@ -149,35 +202,32 @@ export function layoutDocument(
     throw new Error('layoutDocument: page size and margins yield no content area');
   }
 
-  // Pre-scan blocks to build per-section configs.
-  // Each section break carries the CURRENT section's properties (columns, type).
-  // ECMA-376 §17.6.22: w:type specifies how the CURRENT section starts relative
-  // to the previous one. So for the transition at break[N], we need:
-  //   - columns: from break[N+1] (what the next section uses)
-  //   - type: from break[N+1] (how the next section starts)
-  const defaultColumns: ColumnLayout = { count: 1, gap: 0 };
-  const sectionColumnConfigs: ColumnLayout[] = [];
-  const sectionBreakTypes: (SectionBreakBlock['type'] | undefined)[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    if (blocks[i].kind === 'sectionBreak') {
-      const sb = blocks[i] as SectionBreakBlock;
-      sectionColumnConfigs.push(sb.columns ?? defaultColumns);
-      sectionBreakTypes.push(sb.type);
-    }
-  }
-  // Final section uses body-level columns; its type comes from options
-  sectionColumnConfigs.push(options.columns ?? defaultColumns);
-  sectionBreakTypes.push(options.bodyBreakType);
+  // ECMA-376 §17.6.22: each section break carries the CURRENT section's
+  // properties; `w:type` describes how that section starts relative to the
+  // previous one.
+  const bodyConfig: SectionLayoutConfig = { pageSize, margins, columns: options.columns };
+  const finalConfig: SectionLayoutConfig = {
+    pageSize: finalPageSize,
+    margins: finalMargins,
+    columns: options.columns,
+  };
+  const { configs: sectionConfigs, breakIndices } = collectSectionConfigs(
+    blocks,
+    bodyConfig,
+    finalConfig
+  );
+  const sectionBreakTypes = [
+    ...breakIndices.map((i) => (blocks[i] as SectionBreakBlock).type),
+    options.bodyBreakType,
+  ];
 
-  // First section's columns
-  const initialColumns =
-    sectionColumnConfigs.length > 0 ? sectionColumnConfigs[0] : options.columns;
+  const initialConfig = sectionConfigs[0] ?? bodyConfig;
 
-  // Create paginator with first section's columns
+  // Create paginator with first section geometry
   const paginator = createPaginator({
-    pageSize,
-    margins,
-    columns: initialColumns,
+    pageSize: initialConfig.pageSize,
+    margins: initialConfig.margins,
+    columns: initialConfig.columns ?? DEFAULT_COLUMNS,
     footnoteReservedHeights: options.footnoteReservedHeights,
   });
 
@@ -224,12 +274,17 @@ export function layoutDocument(
 
     switch (block.kind) {
       case 'paragraph':
-        layoutParagraph(block, measure as ParagraphMeasure, paginator, contentWidth);
+        layoutParagraph(block, measure as ParagraphMeasure, paginator, paginator.getContentWidth());
         break;
 
       case 'table':
         if (block.floating) {
-          layoutFloatingTable(block, measure as TableMeasure, paginator, contentWidth);
+          layoutFloatingTable(
+            block,
+            measure as TableMeasure,
+            paginator,
+            paginator.getContentWidth()
+          );
         } else {
           layoutTable(block, measure as TableMeasure, paginator);
         }
@@ -258,7 +313,7 @@ export function layoutDocument(
         handleSectionBreak(
           block as SectionBreakBlock,
           paginator,
-          sectionColumnConfigs[sectionIdx + 1] ?? defaultColumns,
+          sectionConfigs[sectionIdx + 1] ?? initialConfig,
           nextType
         );
         sectionIdx++;
@@ -716,13 +771,13 @@ function layoutTextBox(
  * Handle a section break block.
  * @param block - The section break block (current section's properties)
  * @param paginator - The paginator instance
- * @param nextSectionColumns - Column layout for the NEXT section
+ * @param nextSectionConfig - Page layout for the NEXT section
  * @param nextSectionType - Break type of the NEXT section (how it starts relative to current)
  */
 function handleSectionBreak(
   _block: SectionBreakBlock,
   paginator: ReturnType<typeof createPaginator>,
-  nextSectionColumns: ColumnLayout,
+  nextSectionConfig: SectionLayoutConfig,
   nextSectionType?: SectionBreakBlock['type']
 ): void {
   // ECMA-376 §17.6.22: w:type specifies how the NEXT section starts relative to this one.
@@ -731,10 +786,12 @@ function handleSectionBreak(
 
   switch (breakType) {
     case 'nextPage':
+      paginator.updatePageLayout(nextSectionConfig.pageSize, nextSectionConfig.margins);
       paginator.forcePageBreak();
       break;
 
     case 'evenPage': {
+      paginator.updatePageLayout(nextSectionConfig.pageSize, nextSectionConfig.margins);
       const state = paginator.forcePageBreak();
       // If landed on odd page, add another page
       if (state.page.number % 2 !== 0) {
@@ -744,6 +801,7 @@ function handleSectionBreak(
     }
 
     case 'oddPage': {
+      paginator.updatePageLayout(nextSectionConfig.pageSize, nextSectionConfig.margins);
       const state = paginator.forcePageBreak();
       // If landed on even page, add another page
       if (state.page.number % 2 === 0) {
@@ -753,12 +811,18 @@ function handleSectionBreak(
     }
 
     case 'continuous':
-      // No page break, content continues
+      // ECMA-376 §17.6.22: keep current page geometry; defer new size/margins
+      // until the next natural page break. Columns apply immediately below.
+      paginator.updatePageLayout(
+        nextSectionConfig.pageSize,
+        nextSectionConfig.margins,
+        /* applyImmediately */ false
+      );
       break;
   }
 
   // Update column layout for the next section
-  paginator.updateColumns(nextSectionColumns);
+  paginator.updateColumns(nextSectionConfig.columns ?? DEFAULT_COLUMNS);
 }
 
 // Re-export types

@@ -703,7 +703,7 @@ function convertParagraphAttrs(
   }
 
   // Page break control
-  if (pmAttrs.pageBreakBefore) {
+  if (pmAttrs.pageBreakBefore || pmAttrs.renderedPageBreakBefore) {
     attrs.pageBreakBefore = true;
   }
   if (pmAttrs.keepNext) {
@@ -934,6 +934,12 @@ function convertTableCell(node: PMNode, startPos: number, options: ToFlowBlocksO
   });
 
   const attrs = node.attrs;
+  const widthValue = attrs.width as number | undefined;
+  const widthType = attrs.widthType as string | undefined;
+  const width =
+    widthValue && (!widthType || widthType === 'dxa' || widthType === 'auto')
+      ? twipsToPixels(widthValue)
+      : undefined;
 
   // Convert cell margins (twips) to pixel padding
   // OOXML TableNormal defaults: top=0, bottom=0, left=108 twips (~7px), right=108 twips (~7px)
@@ -952,7 +958,9 @@ function convertTableCell(node: PMNode, startPos: number, options: ToFlowBlocksO
     blocks,
     colSpan: attrs.colspan as number,
     rowSpan: attrs.rowspan as number,
-    width: attrs.width ? twipsToPixels(attrs.width as number) : undefined,
+    width,
+    widthValue,
+    widthType,
     verticalAlign: attrs.verticalAlign as 'top' | 'center' | 'bottom' | undefined,
     background: attrs.backgroundColor ? `#${attrs.backgroundColor}` : undefined,
     borders: extractCellBorders(attrs as Record<string, unknown>, options.theme),
@@ -1173,6 +1181,12 @@ export function toFlowBlocks(doc: PMNode, options: ToFlowBlocksOptions = {}): Fl
 
   const blocks: FlowBlock[] = [];
   const offset = 0; // Start at document beginning
+  let lastSectionMarginsTwips: { top: number; bottom: number; left: number; right: number } = {
+    top: 1440,
+    bottom: 1440,
+    left: 1440,
+    right: 1440,
+  };
   // Shared counter map: paragraphs in tables and text boxes update it too,
   // so list numbering stays continuous across containers.
   if (!opts.listCounters) {
@@ -1204,21 +1218,35 @@ export function toFlowBlocks(doc: PMNode, options: ToFlowBlocksOptions = {}): Fl
             };
 
             if (secProps) {
-              // Populate page size
-              if (secProps.pageWidth || secProps.pageHeight) {
+              // Populate page size when at least one dimension is overridden.
+              if (secProps.pageWidth !== undefined || secProps.pageHeight !== undefined) {
                 sectionBreak.pageSize = {
                   w: twipsToPixels(secProps.pageWidth ?? 12240),
                   h: twipsToPixels(secProps.pageHeight ?? 15840),
                 };
               }
-              // Populate margins
-              if (secProps.marginTop !== undefined || secProps.marginLeft !== undefined) {
-                sectionBreak.margins = {
-                  top: twipsToPixels(secProps.marginTop ?? 1440),
-                  bottom: twipsToPixels(secProps.marginBottom ?? 1440),
-                  left: twipsToPixels(secProps.marginLeft ?? 1440),
-                  right: twipsToPixels(secProps.marginRight ?? 1440),
+              // Section overrides any margin → emit a full margins record;
+              // unset sides inherit from the prior section (tracked above)
+              // instead of resetting to the OOXML 1440 default.
+              if (
+                secProps.marginTop !== undefined ||
+                secProps.marginBottom !== undefined ||
+                secProps.marginLeft !== undefined ||
+                secProps.marginRight !== undefined
+              ) {
+                const mergedTwips = {
+                  top: secProps.marginTop ?? lastSectionMarginsTwips.top,
+                  bottom: secProps.marginBottom ?? lastSectionMarginsTwips.bottom,
+                  left: secProps.marginLeft ?? lastSectionMarginsTwips.left,
+                  right: secProps.marginRight ?? lastSectionMarginsTwips.right,
                 };
+                sectionBreak.margins = {
+                  top: twipsToPixels(mergedTwips.top),
+                  bottom: twipsToPixels(mergedTwips.bottom),
+                  left: twipsToPixels(mergedTwips.left),
+                  right: twipsToPixels(mergedTwips.right),
+                };
+                lastSectionMarginsTwips = mergedTwips;
               }
               // Populate columns
               const colCount = secProps.columnCount ?? 1;

@@ -871,15 +871,36 @@ export function serializeParagraph(paragraph: Paragraph): string {
     parts.push(pPrXml);
   }
 
-  // Add paragraph content
+  // Add paragraph content. Marker injection (when `renderedPageBreakBefore`
+  // is set) is handled by `injectRenderedPageBreakIntoFirstRun` below.
+  let pendingRenderedPageBreak = !!paragraph.renderedPageBreakBefore;
   for (const content of paragraph.content) {
-    const contentXml = serializeParagraphContent(content);
-    if (contentXml) {
-      parts.push(contentXml);
+    let contentXml = serializeParagraphContent(content);
+    if (!contentXml) continue;
+    if (pendingRenderedPageBreak) {
+      const next = injectRenderedPageBreakIntoFirstRun(contentXml);
+      if (next) {
+        contentXml = next;
+        pendingRenderedPageBreak = false;
+      }
     }
+    parts.push(contentXml);
   }
 
   return `<w:p${attrsStr}>${parts.join('')}</w:p>`;
+}
+
+/**
+ * Insert `<w:lastRenderedPageBreak/>` after the first `<w:r ...>` opening
+ * tag in `xml` (matches runs nested in hyperlink / sdt / ins / del /
+ * moveFrom / moveTo / smartTag wrappers). Returns `null` when no `<w:r>`
+ * is present so the caller can keep scanning later siblings. The lookahead
+ * `(?=[\s>/])` skips `<w:rPr>` and any other prefix-collision tag.
+ */
+function injectRenderedPageBreakIntoFirstRun(xml: string): string | null {
+  const re = /<w:r(?=[\s>/])[^>]*>/;
+  if (!re.test(xml)) return null;
+  return xml.replace(re, (match) => `${match}<w:lastRenderedPageBreak/>`);
 }
 
 /**

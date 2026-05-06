@@ -168,6 +168,46 @@ describe('Layout Engine - Page Production', () => {
       expect(layout.pages[0].fragments.length).toBe(3);
     });
 
+    test('uses the next section page size and margins after a section break', () => {
+      const firstSectionPage = { w: 800, h: 1000 };
+      const secondSectionPage = { w: 1000, h: 800 };
+      const firstSectionMargins: PageMargins = { top: 80, right: 80, bottom: 80, left: 80 };
+      const secondSectionMargins: PageMargins = { top: 40, right: 120, bottom: 40, left: 120 };
+      const blocks: FlowBlock[] = [
+        makeParagraphBlock(0, 'Portrait section', 1),
+        {
+          kind: 'sectionBreak',
+          id: 1,
+          pageSize: firstSectionPage,
+          margins: firstSectionMargins,
+        },
+        makeParagraphBlock(2, 'Landscape section', 20),
+      ];
+      const measures: Measure[] = [
+        makeParagraphMeasure([makeLine(0, 0, 0, 16, 120, 24)]),
+        { kind: 'sectionBreak' },
+        makeParagraphMeasure([makeLine(0, 0, 0, 17, 120, 24)]),
+      ];
+
+      const layout = layoutDocument(
+        blocks,
+        measures,
+        makeLayoutOptions({
+          pageSize: firstSectionPage,
+          margins: firstSectionMargins,
+          finalPageSize: secondSectionPage,
+          finalMargins: secondSectionMargins,
+        })
+      );
+
+      expect(layout.pages.length).toBe(2);
+      expect(layout.pages[0].size).toEqual(firstSectionPage);
+      expect(layout.pages[0].margins).toEqual(firstSectionMargins);
+      expect(layout.pages[1].size).toEqual(secondSectionPage);
+      expect(layout.pages[1].margins).toEqual(secondSectionMargins);
+      expect(layout.pages[1].fragments[0].x).toBe(secondSectionMargins.left);
+    });
+
     test('paragraph positions are stacked vertically', () => {
       const blocks: FlowBlock[] = [
         makeParagraphBlock(0, 'First', 1),

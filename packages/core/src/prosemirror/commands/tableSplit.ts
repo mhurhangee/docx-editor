@@ -149,7 +149,8 @@ function buildCellAttrs(
   attrs.rowspan = rowspan;
   attrs.colwidth = null;
   if (totalWidth > 0) {
-    attrs.width = Math.round((cellWidth / totalWidth) * 100);
+    // 50ths of a percent per ECMA-376 §17.18.111 (5000 = 100%).
+    attrs.width = Math.round((cellWidth / totalWidth) * 5000);
     attrs.widthType = 'pct';
   }
   if (spansChanged) {

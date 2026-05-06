@@ -876,7 +876,8 @@ function parseCellContent(
   theme: Theme | null,
   numbering: NumberingMap | null,
   rels: RelationshipMap | null,
-  media: Map<string, MediaFile> | null
+  media: Map<string, MediaFile> | null,
+  options?: { inHeaderFooter?: boolean }
 ): (Paragraph | Table)[] {
   const content: (Paragraph | Table)[] = [];
 
@@ -890,11 +891,11 @@ function parseCellContent(
 
     if (localName === 'p') {
       // Parse paragraph
-      const para = parseParagraph(child, styles, theme, numbering, rels, media);
+      const para = parseParagraph(child, styles, theme, numbering, rels, media, options);
       content.push(para);
     } else if (localName === 'tbl') {
       // Parse nested table (recursive)
-      const table = parseTable(child, styles, theme, numbering, rels, media);
+      const table = parseTable(child, styles, theme, numbering, rels, media, options);
       content.push(table);
     }
     // Other content types in cells are rare but could be added
@@ -932,7 +933,8 @@ export function parseTableCell(
   theme: Theme | null,
   numbering: NumberingMap | null,
   rels: RelationshipMap | null,
-  media: Map<string, MediaFile> | null
+  media: Map<string, MediaFile> | null,
+  options?: { inHeaderFooter?: boolean }
 ): TableCell {
   const cell: TableCell = {
     type: 'tableCell',
@@ -949,7 +951,7 @@ export function parseTableCell(
   cell.structuralChange = parseTableCellStructuralChange(tcPrElement);
 
   // Parse content
-  cell.content = parseCellContent(tcElement, styles, theme, numbering, rels, media);
+  cell.content = parseCellContent(tcElement, styles, theme, numbering, rels, media, options);
 
   return cell;
 }
@@ -975,7 +977,8 @@ export function parseTableRow(
   theme: Theme | null,
   numbering: NumberingMap | null,
   rels: RelationshipMap | null,
-  media: Map<string, MediaFile> | null
+  media: Map<string, MediaFile> | null,
+  options?: { inHeaderFooter?: boolean }
 ): TableRow {
   const row: TableRow = {
     type: 'tableRow',
@@ -994,7 +997,7 @@ export function parseTableRow(
   // Parse cells
   const cells = findChildren(trElement, 'w', 'tc');
   for (const cellElement of cells) {
-    const cell = parseTableCell(cellElement, styles, theme, numbering, rels, media);
+    const cell = parseTableCell(cellElement, styles, theme, numbering, rels, media, options);
     row.cells.push(cell);
   }
 
@@ -1022,7 +1025,44 @@ export function parseTableGrid(tblGridElement: XmlElement | null): number[] | un
     widths.push(width);
   }
 
+  if (widths.length > 0 && widths.every((width) => width <= 0)) {
+    return undefined;
+  }
+
   return widths.length > 0 ? widths : undefined;
+}
+
+function getRowGridSpan(row: TableRow): number {
+  return row.cells.reduce((sum, cell) => sum + (cell.formatting?.gridSpan ?? 1), 0);
+}
+
+function inferImplicitSingleCellRowSpans(table: Table): void {
+  const maxColumns = Math.max(
+    table.columnWidths?.length ?? 0,
+    ...table.rows.map((row) => getRowGridSpan(row))
+  );
+  if (maxColumns <= 1) return;
+
+  for (const row of table.rows) {
+    if (row.cells.length !== 1) continue;
+
+    const cell = row.cells[0];
+    const currentSpan = cell.formatting?.gridSpan ?? 1;
+    if (currentSpan >= maxColumns) continue;
+
+    // Don't expand a vertically-merged cell — its width comes from the cell
+    // above and the spec already determines the grid layout. Likewise skip
+    // any cell that already declared a gridSpan, even if the parser stored
+    // 1 as undefined: the rule below only fires when there is no other
+    // information about the row's intended span.
+    if (cell.formatting?.vMerge) continue;
+    if (cell.formatting?.gridSpan != null) continue;
+
+    cell.formatting = {
+      ...(cell.formatting ?? {}),
+      gridSpan: maxColumns,
+    };
+  }
 }
 
 // ============================================================================
@@ -1046,7 +1086,8 @@ export function parseTable(
   theme: Theme | null,
   numbering: NumberingMap | null,
   rels: RelationshipMap | null,
-  media: Map<string, MediaFile> | null
+  media: Map<string, MediaFile> | null,
+  options?: { inHeaderFooter?: boolean }
 ): Table {
   const table: Table = {
     type: 'table',
@@ -1070,9 +1111,11 @@ export function parseTable(
   // Parse rows
   const rows = findChildren(tblElement, 'w', 'tr');
   for (const rowElement of rows) {
-    const row = parseTableRow(rowElement, styles, theme, numbering, rels, media);
+    const row = parseTableRow(rowElement, styles, theme, numbering, rels, media, options);
     table.rows.push(row);
   }
+
+  inferImplicitSingleCellRowSpans(table);
 
   return table;
 }

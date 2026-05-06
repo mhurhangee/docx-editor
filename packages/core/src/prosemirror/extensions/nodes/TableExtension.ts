@@ -1049,7 +1049,9 @@ export const TablePluginExtension = createExtension({
       if (dispatch) {
         let tr = state.tr;
         const newColumnCount = (context.columnCount || 1) + 1;
-        const newColWidthPercent = Math.floor(100 / newColumnCount);
+        // Width is stored as 50ths of a percent per ECMA-376 §17.18.111
+        // (5000 = 100%) so resolveTableWidthPx can apply it directly.
+        const newColWidthPercent = Math.floor(5000 / newColumnCount);
         const rowStarts: number[] = [];
         let rowPos = context.tablePos + 1;
 
@@ -1141,7 +1143,9 @@ export const TablePluginExtension = createExtension({
       if (dispatch) {
         let tr = state.tr;
         const newColumnCount = (context.columnCount || 1) + 1;
-        const newColWidthPercent = Math.floor(100 / newColumnCount);
+        // Width is stored as 50ths of a percent per ECMA-376 §17.18.111
+        // (5000 = 100%) so resolveTableWidthPx can apply it directly.
+        const newColWidthPercent = Math.floor(5000 / newColumnCount);
         const rowStarts: number[] = [];
         let rowPos = context.tablePos + 1;
 
@@ -1235,7 +1239,9 @@ export const TablePluginExtension = createExtension({
       if (dispatch) {
         let tr = state.tr;
         const newColumnCount = (context.columnCount || 2) - 1;
-        const newColWidthPercent = Math.floor(100 / newColumnCount);
+        // Width is stored as 50ths of a percent per ECMA-376 §17.18.111
+        // (5000 = 100%) so resolveTableWidthPx can apply it directly.
+        const newColWidthPercent = Math.floor(5000 / newColumnCount);
 
         const deleteOps: { start: number; end: number }[] = [];
         let rowPos = context.tablePos + 1;

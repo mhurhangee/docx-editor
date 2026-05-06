@@ -59,18 +59,33 @@ function calculateColumnWidth(
  * Creates a paginator for managing page layout state.
  */
 export function createPaginator(options: PaginatorOptions) {
-  const { pageSize, margins } = options;
+  let pageSize = { ...options.pageSize };
+  let margins = { ...options.margins };
   let columns: ColumnLayout = options.columns ?? { count: 1, gap: 0 };
+  let warnedOversizedFragment = false;
+
+  // Geometry queued by a continuous section break — applied when the next
+  // page is naturally created so the current page keeps the old section's
+  // size and margins per ECMA-376 §17.6.22.
+  let pendingPageSize: { w: number; h: number } | undefined;
+  let pendingMargins: PageMargins | undefined;
 
   const pages: Page[] = [];
   const states: PageState[] = [];
 
-  // Calculate content boundaries
-  const topMargin = margins.top;
-  const contentBottom = pageSize.h - margins.bottom;
-  const contentHeight = contentBottom - topMargin;
+  function getContentBottom(): number {
+    return pageSize.h - margins.bottom;
+  }
 
-  if (contentHeight <= 0) {
+  function getContentHeight(): number {
+    return getContentBottom() - margins.top;
+  }
+
+  function getContentWidth(): number {
+    return pageSize.w - margins.left - margins.right;
+  }
+
+  if (getContentHeight() <= 0) {
     throw new Error('Paginator: page size and margins yield no content area');
   }
 
@@ -81,7 +96,7 @@ export function createPaginator(options: PaginatorOptions) {
   // Defaults to topMargin but gets updated when columns change mid-page
   // (continuous section break). When advanceColumn moves to the next column,
   // it resets cursorY to this value instead of topMargin.
-  let columnRegionTop = topMargin;
+  let columnRegionTop = margins.top;
 
   /**
    * Get X position for a given column index.
@@ -94,7 +109,18 @@ export function createPaginator(options: PaginatorOptions) {
    * Create a new page and add it to the list.
    */
   function createNewPage(): PageState {
+    // Apply any geometry queued by a continuous section break before
+    // computing the new page's size / margins.
+    if (pendingPageSize || pendingMargins) {
+      if (pendingPageSize) pageSize = pendingPageSize;
+      if (pendingMargins) margins = pendingMargins;
+      pendingPageSize = undefined;
+      pendingMargins = undefined;
+      columnWidth = calculateColumnWidth(pageSize.w, margins.left, margins.right, columns);
+    }
     const pageNumber = pages.length + 1;
+    const topMargin = margins.top;
+    const contentBottom = getContentBottom();
 
     // Reduce content bottom by footnote reserved height for this page
     const footnoteHeight = options.footnoteReservedHeights?.get(pageNumber) ?? 0;
@@ -182,19 +208,25 @@ export function createPaginator(options: PaginatorOptions) {
     let state = getCurrentState();
     const safeHeight = Number.isFinite(height) && height > 0 ? height : 0;
 
-    // Oversized fragment guard: if a single fragment is taller than the
-    // available content area on an empty column/page, place it there and allow
-    // overflow instead of looping forever creating new pages.
-    const columnCapacity = state.contentBottom - state.topMargin;
-    if (safeHeight > columnCapacity) {
-      if (state.cursorY !== state.topMargin) {
-        state = advanceColumn(state);
-      }
-      return state;
-    }
-
-    // Keep advancing until we have space
     while (!fits(safeHeight, state)) {
+      // Oversized-fragment guard: re-checked each iteration because page
+      // geometry can change between iterations (a continuous section break
+      // queues new size/margins that take effect on `createNewPage`). If a
+      // single fragment is taller than the content area of an EMPTY page or
+      // column, place it with overflow rather than loop forever.
+      const columnCapacity = state.contentBottom - state.topMargin;
+      if (safeHeight > columnCapacity) {
+        if (!warnedOversizedFragment) {
+          warnedOversizedFragment = true;
+          console.warn(
+            `Paginator: fragment height ${safeHeight.toFixed(0)}px exceeds page content height ${columnCapacity.toFixed(0)}px; placing with overflow.`
+          );
+        }
+        if (state.cursorY !== state.topMargin) {
+          state = advanceColumn(state);
+        }
+        return state;
+      }
       state = advanceColumn(state);
     }
 
@@ -242,8 +274,18 @@ export function createPaginator(options: PaginatorOptions) {
 
   /**
    * Force a page break - move to a new page.
+   *
+   * Idempotent when the current page is empty: a section break followed by
+   * `pageBreakBefore` on the next paragraph (or any other chain of forced
+   * breaks) collapses to a single break instead of leaving a phantom page.
    */
   function forcePageBreak(): PageState {
+    if (states.length > 0) {
+      const current = states[states.length - 1];
+      if (current.page.fragments.length === 0 && current.cursorY === current.topMargin) {
+        return current;
+      }
+    }
     return createNewPage();
   }
 
@@ -278,6 +320,48 @@ export function createPaginator(options: PaginatorOptions) {
     state.columnIndex = 0;
   }
 
+  /**
+   * Update page geometry for pages created after a section break.
+   *
+   * `applyImmediately = true` (default) swaps the active geometry so the
+   * NEXT page created by `forcePageBreak`/`createNewPage` and the column
+   * width on the current page both reflect the new section. Used by
+   * `nextPage` / `evenPage` / `oddPage` breaks where the next content
+   * starts on a fresh page anyway.
+   *
+   * `applyImmediately = false` defers the swap until `createNewPage`
+   * actually fires. Used by `continuous` breaks: ECMA-376 §17.6.22 keeps
+   * the current page in the OLD section's geometry but applies the new
+   * section's page size / margins to the NEXT naturally-created page.
+   * The current page's `columnWidth` is left intact under the old
+   * geometry; columns for the new section are still applied via
+   * `updateColumns`.
+   */
+  function updatePageLayout(
+    newPageSize?: { w: number; h: number },
+    newMargins?: PageMargins,
+    applyImmediately = true
+  ): void {
+    if (!applyImmediately) {
+      pendingPageSize = newPageSize ? { ...newPageSize } : pendingPageSize;
+      pendingMargins = newMargins ? { ...newMargins } : pendingMargins;
+      return;
+    }
+    if (newPageSize) {
+      pageSize = { ...newPageSize };
+    }
+    if (newMargins) {
+      margins = { ...newMargins };
+    }
+    if (getContentHeight() <= 0) {
+      throw new Error('Paginator: section page size and margins yield no content area');
+    }
+    columnWidth = calculateColumnWidth(pageSize.w, margins.left, margins.right, columns);
+    // A pending swap is now superseded by this immediate swap.
+    pendingPageSize = undefined;
+    pendingMargins = undefined;
+  }
+
   return {
     /** All pages created so far. */
     pages,
@@ -295,6 +379,8 @@ export function createPaginator(options: PaginatorOptions) {
     getCurrentState,
     /** Get available height in current column. */
     getAvailableHeight: () => getAvailableHeight(getCurrentState()),
+    /** Get content width for the active section. */
+    getContentWidth,
     /** Check if height fits in current column. */
     fits: (height: number) => fits(height),
     /** Ensure height fits, advancing if needed. */
@@ -309,6 +395,8 @@ export function createPaginator(options: PaginatorOptions) {
     getColumnX,
     /** Update column layout (for section breaks). */
     updateColumns,
+    /** Update page size/margins for subsequent pages. */
+    updatePageLayout,
   };
 }
 

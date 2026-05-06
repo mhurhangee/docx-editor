@@ -634,6 +634,122 @@ function getLocalName(name: string | undefined): string {
   return colonIndex >= 0 ? name.substring(colonIndex + 1) : name;
 }
 
+/**
+ * Walks a paragraph (and recurses through inline wrappers like hyperlink,
+ * smartTag, sdt, fldSimple, ins, del) looking for the first piece of visible
+ * run content. Returns true when a `<w:lastRenderedPageBreak/>` precedes
+ * that visible content — i.e. Word recorded a page break before this
+ * paragraph. Also returns true on a leading hard `<w:br w:type="page"/>`
+ * placed before any visible content.
+ */
+function paragraphStartsWithRenderedPageBreak(node: XmlElement): boolean {
+  // Wrappers that just contain runs at this layer; recurse into them.
+  const inlineWrappers = new Set([
+    'hyperlink',
+    'smartTag',
+    'sdt',
+    'sdtContent',
+    'fldSimple',
+    'customXml',
+    'ins',
+    'del',
+    'moveFrom',
+    'moveTo',
+  ]);
+  // Sub-paragraph markers that don't carry visible content; skip past them.
+  const nonContentMarkers = new Set([
+    'pPr',
+    'proofErr',
+    'bookmarkStart',
+    'bookmarkEnd',
+    'commentRangeStart',
+    'commentRangeEnd',
+    'commentReference',
+    'permStart',
+    'permEnd',
+    'rsidR',
+  ]);
+  // Run children that count as visible content (cursor renders something).
+  const visibleRunContent = new Set([
+    't',
+    'tab',
+    'br',
+    'cr',
+    'sym',
+    'drawing',
+    'pict',
+    'object',
+    'softHyphen',
+    'noBreakHyphen',
+    'fldChar',
+    'instrText',
+    'pgNum',
+    'separator',
+    'continuationSeparator',
+    'footnoteRef',
+    'endnoteRef',
+    'footnoteReference',
+    'endnoteReference',
+    'ptab',
+    'monthShort',
+    'monthLong',
+    'yearShort',
+    'yearLong',
+    'dayShort',
+    'dayLong',
+  ]);
+
+  type Result = 'forced' | 'visible' | 'continue';
+  let sawRenderedPageBreak = false;
+
+  function visit(el: XmlElement): Result {
+    for (const child of getChildElements(el)) {
+      const childName = getLocalName(child.name);
+      if (nonContentMarkers.has(childName)) continue;
+      if (childName === 'lastRenderedPageBreak') {
+        sawRenderedPageBreak = true;
+        continue;
+      }
+
+      if (childName === 'r') {
+        for (const runChild of getChildElements(child)) {
+          const runChildName = getLocalName(runChild.name);
+          if (runChildName === 'rPr') continue;
+          if (runChildName === 'lastRenderedPageBreak') {
+            sawRenderedPageBreak = true;
+            continue;
+          }
+          if (runChildName === 'br' && getAttribute(runChild, 'w', 'type') === 'page') {
+            // A hard page break is itself a forced break — mark unconditionally.
+            return 'forced';
+          }
+          if (visibleRunContent.has(runChildName)) {
+            return 'visible';
+          }
+        }
+        // Empty run (only rPr or skipped markers) — keep scanning siblings.
+        continue;
+      }
+
+      if (inlineWrappers.has(childName)) {
+        const r = visit(child);
+        if (r !== 'continue') return r;
+        continue;
+      }
+
+      // Anything else (an unexpected sub-element) is treated as a stop —
+      // we can't know whether to count it as visible content.
+      return 'continue';
+    }
+    return 'continue';
+  }
+
+  const outcome = visit(node);
+  if (outcome === 'forced') return true;
+  if (outcome === 'visible') return sawRenderedPageBreak;
+  return false;
+}
+
 type TrackedChangeParseContext = 'default' | 'deletion';
 
 function replaceLocalName(name: string | undefined, localName: string): string {
@@ -1175,6 +1291,8 @@ function parseParagraphContents(
  * @param numbering - Numbering definitions for list info
  * @param rels - Relationship map for resolving hyperlink URLs
  * @param media - Media files map for image data
+ * @param options - `inHeaderFooter` skips `<w:lastRenderedPageBreak/>`
+ *   detection since headers and footers reflow per page.
  * @returns Parsed Paragraph object
  */
 export function parseParagraph(
@@ -1183,7 +1301,8 @@ export function parseParagraph(
   theme: Theme | null,
   numbering: NumberingMap | null,
   rels: RelationshipMap | null = null,
-  media: Map<string, MediaFile> | null = null
+  media: Map<string, MediaFile> | null = null,
+  options?: { inHeaderFooter?: boolean }
 ): Paragraph {
   const paragraph: Paragraph = {
     type: 'paragraph',
@@ -1199,6 +1318,12 @@ export function parseParagraph(
   const textId = getAttribute(node, 'w14', 'textId') ?? getAttribute(node, 'w', 'textId');
   if (textId) {
     paragraph.textId = textId;
+  }
+
+  // `<w:lastRenderedPageBreak/>` only makes sense in body flow; headers and
+  // footers reflow per page, so detection is skipped there.
+  if (!options?.inHeaderFooter && paragraphStartsWithRenderedPageBreak(node)) {
+    paragraph.renderedPageBreakBefore = true;
   }
 
   // Parse paragraph properties (w:pPr)

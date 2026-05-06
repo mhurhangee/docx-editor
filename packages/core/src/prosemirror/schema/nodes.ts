@@ -96,6 +96,12 @@ export interface ParagraphAttrs {
 
   // Page break control
   pageBreakBefore?: boolean;
+  /**
+   * Word's cached layout marker (`<w:lastRenderedPageBreak/>`). Treated like
+   * `pageBreakBefore` for layout, kept as a separate attr so save+reload
+   * preserves the marker at the same position Word recorded.
+   */
+  renderedPageBreakBefore?: boolean;
   keepNext?: boolean;
   keepLines?: boolean;
   /** Contextual spacing — suppress space between same-style paragraphs */

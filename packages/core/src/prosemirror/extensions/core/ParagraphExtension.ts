@@ -275,6 +275,8 @@ const paragraphNodeSpec: NodeSpec = {
     shading: { default: null },
     tabs: { default: null },
     pageBreakBefore: { default: null },
+    // `<w:lastRenderedPageBreak/>` — Word's cached layout marker.
+    renderedPageBreakBefore: { default: null },
     keepNext: { default: null },
     keepLines: { default: null },
     contextualSpacing: { default: null },

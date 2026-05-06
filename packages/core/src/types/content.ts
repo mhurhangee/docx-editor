@@ -1159,6 +1159,8 @@ export interface Paragraph {
   content: ParagraphContent[];
   /** Computed list rendering (if this is a list item) */
   listRendering?: ListRendering;
+  /** Word's cached layout says this paragraph started on a new rendered page. */
+  renderedPageBreakBefore?: boolean;
   /** Section properties (if this paragraph ends a section) */
   sectionProperties?: SectionProperties;
 }
