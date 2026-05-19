@@ -1,72 +1,47 @@
 # @eigenpal/docx-editor-core
 
-Framework-agnostic engine that powers [`@eigenpal/docx-editor-react`](https://www.npmjs.com/package/@eigenpal/docx-editor-react) (React) and any other adapter you want to build. Parses DOCX, builds the document model, runs ProseMirror, and renders Word-fidelity pages.
+Framework-agnostic core for the [docx-editor](https://docx-editor.dev). Parses DOCX, builds the document model, runs ProseMirror, and renders Word-fidelity pages. Powers the React and Vue adapters and anything else you build on top.
 
-This package is consumed via curated subpath imports — pick the smallest entry point that gives you what you need, since each one tree-shakes independently.
+## Quick Start
 
-## Which entry point?
+Most users want the [React](https://www.npmjs.com/package/@eigenpal/docx-editor-react) or [Vue](https://www.npmjs.com/package/@eigenpal/docx-editor-vue) adapter. Reach for core directly when building a custom adapter, running headless on the server, or driving DOCX parsing/serialization without a UI.
 
+```bash
+npm install @eigenpal/docx-editor-core
 ```
-@eigenpal/docx-editor-core                  ─ default fat barrel (no DOM)
-@eigenpal/docx-editor-core/headless         ─ same as `.`, named for Node.js use
-@eigenpal/docx-editor-core/core-plugins     ─ plugin registry + base plugins
-@eigenpal/docx-editor-core/mcp              ─ Model Context Protocol server
-```
-
-### Most users (build a Word-fidelity editor)
-
-Use the React adapter directly: `npm i @eigenpal/docx-editor-react`. The subpaths below are for adapter authors and advanced integrations.
-
-### Adapter authors (Solid, Vue, Svelte, custom UI)
-
-Wire these together:
-
-| Step                                     | Subpath                                           | What you get                                                                                        |
-| ---------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 1. Parse the DOCX                        | `./docx`                                          | `parseDocx(buffer) → Document` plus per-element parsers (image, table, footnote, hyperlink, etc.)   |
-| 2. Convert to ProseMirror doc            | `./prosemirror/conversion`                        | `toProseDoc(document) → PMNode`, `fromProseDoc(node) → Document`                                    |
-| 3. Build the schema + extensions         | `./prosemirror/extensions`                        | `createStarterKit()`, `ExtensionManager`, `ParagraphChangeTrackerExtension`, etc.                   |
-| 4. Get the curated PM commands & plugins | `./prosemirror/commands`, `./prosemirror/plugins` | Formatting commands, table commands, suggestion-mode plugin, selection tracker                      |
-| 5. Lay out into pages                    | `./layout-engine`                                 | `layoutDocument(blocks, measures, options) → Layout`                                                |
-| 6. Bridge clicks/measurements            | `./layout-bridge`                                 | `toFlowBlocks`, `mouseToPosition`, `selectionToRects`, `hitTest`, footnote layout, text measurement |
-| 7. Paint the pages                       | `./layout-painter`                                | `renderPage(page, context, options) → HTMLElement`, `LayoutPainter` class                           |
-| 8. Save back to DOCX                     | `./docx`                                          | `repackDocx(buffer, edits)`, `attemptSelectiveSave(...)`                                            |
-| (CSS)                                    | `./prosemirror/editor.css`                        | Default editor styles — import once at the top of your app                                          |
-
-### Want headless agents (no UI)?
 
 ```ts
-import { DocumentAgent, executeCommand } from '@eigenpal/docx-editor-core/agent';
+import { readFile } from 'node:fs/promises';
+import { parseDocx } from '@eigenpal/docx-editor-core/docx';
+
+const buffer = await readFile('contract.docx');
+const document = await parseDocx(buffer);
+console.log(document.paragraphs.length);
 ```
 
-The `./agent` subpath gives you the full `DocumentAgent` API plus the `AgentCommand` types — useful for backend automation, batch processing, or building agentic workflows on top of DOCX without rendering.
+Each subpath tree-shakes independently. Pick the smallest entry point that gives you what you need.
 
-### Just need a utility?
+## Subpath map
 
-```ts
-import { twipsToPixels, resolveColor } from '@eigenpal/docx-editor-core/utils';
-```
-
-The `./utils` subpath has a curated set of unit conversions, color resolution, font loading, clipboard handling, template processing, and selection helpers.
-
-### Just need a type?
-
-```ts
-import type { Document, Paragraph } from '@eigenpal/docx-editor-core/types/document';
-import type { Comment } from '@eigenpal/docx-editor-core/types/content';
-import type { AgentCommand } from '@eigenpal/docx-editor-core/types/agentApi';
-```
+| Building...                       | Import from                                                      | What you get                                                                       |
+| --------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| A new framework adapter           | `./docx`, `./prosemirror/conversion`, `./prosemirror/extensions` | `parseDocx`, `toProseDoc` / `fromProseDoc`, `createStarterKit`, `ExtensionManager` |
+| Custom layout / rendering         | `./layout-engine`, `./layout-bridge`, `./layout-painter`         | `layoutDocument`, `mouseToPosition`, `renderPage`, `LayoutPainter`                 |
+| Editor commands and plugins       | `./prosemirror/commands`, `./prosemirror/plugins`                | Formatting, tables, suggestion mode, selection tracker                             |
+| Saving back to `.docx`            | `./docx`                                                         | `repackDocx`, `attemptSelectiveSave`                                               |
+| Headless agents (no UI)           | `./agent`                                                        | `DocumentAgent`, `executeCommand`, `AgentCommand` types                            |
+| An MCP server                     | `./mcp`                                                          | Model Context Protocol server scaffolding                                          |
+| Just unit/color/clipboard helpers | `./utils`                                                        | `twipsToPixels`, `resolveColor`, font loading, clipboard, selection helpers        |
+| Just a type                       | `./types/document`, `./types/content`, `./types/agentApi`        | `Document`, `Paragraph`, `Comment`, `AgentCommand`, ...                            |
+| Default editor stylesheet         | `./prosemirror/editor.css`                                       | Import once at the top of your app                                                 |
 
 ## Stability
 
-| Subpath                                                                                                                           | Stability                                                                                                                                                            |
-| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.`, `./headless`, `./core-plugins`, `./mcp`, `./types/*`, `./utils`, `./agent`, `./docx`, `./docx/serializer`, `./prosemirror/*` | Stable. Breaking changes follow SemVer.                                                                                                                              |
-| `./layout-engine`, `./layout-painter`, `./layout-bridge`, `./plugin-api`                                                          | **`@experimental`** — used by the first-party React adapter, but the API may change in minor releases until a third-party adapter validates it. Pin a version range. |
+`./layout-engine`, `./layout-painter`, `./layout-bridge`, and `./plugin-api` are **`@experimental`** — used by the first-party adapters but the API may change in minor releases until a third-party adapter validates it. Pin a version range. Everything else follows SemVer.
 
 ## Peer dependencies
 
-ProseMirror packages are declared as `peerDependencies` so consumer bundles don't end up with duplicate copies. Install the matching versions yourself:
+ProseMirror packages are declared as `peerDependencies` so consumer bundles don't ship duplicates:
 
 ```bash
 npm i prosemirror-commands prosemirror-dropcursor prosemirror-history \
@@ -76,8 +51,4 @@ npm i prosemirror-commands prosemirror-dropcursor prosemirror-history \
 
 ## Architecture
 
-The editor uses a dual-rendering system: a hidden ProseMirror instance owns editing state (selection, undo/redo, commands) while a separate `layout-painter` produces the visible pages. See [CLAUDE.md](https://github.com/eigenpal/docx-editor/blob/main/CLAUDE.md#editor-architecture--dual-rendering-system) in the repo for the full architectural breakdown.
-
-## License
-
-MIT
+Dual-rendering: a hidden ProseMirror instance owns editing state (selection, undo/redo, commands) while `layout-painter` produces the visible pages. Full breakdown: [CLAUDE.md](https://github.com/eigenpal/docx-editor/blob/main/CLAUDE.md#editor-architecture--dual-rendering-system).
