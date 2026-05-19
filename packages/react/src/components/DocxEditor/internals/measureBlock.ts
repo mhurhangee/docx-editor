@@ -26,6 +26,7 @@ import type {
   TextBoxBlock,
 } from '@eigenpal/docx-editor-core/layout-engine';
 import {
+  clampFloatingWrapMargins,
   type FloatingImageZone,
   getCachedParagraphMeasure,
   measureParagraph,
@@ -114,6 +115,12 @@ function extractFloatingZones(blocks: FlowBlock[], contentWidth: number): Floati
         rightMargin = imgRun.width + distLeft;
       }
 
+      ({ leftMargin, rightMargin } = clampFloatingWrapMargins(
+        leftMargin,
+        rightMargin,
+        contentWidth
+      ));
+
       if (leftMargin > 0 || rightMargin > 0) {
         // Images positioned relative to margin/page apply globally (before their anchor paragraph)
         const isMarginRelative =
@@ -174,6 +181,8 @@ function extractFloatingZones(blocks: FlowBlock[], contentWidth: number): Floati
     } else {
       rightMargin = contentWidth - x + distLeft;
     }
+
+    ({ leftMargin, rightMargin } = clampFloatingWrapMargins(leftMargin, rightMargin, contentWidth));
 
     const topY = floating.tblpY ?? 0;
     const bottomY = topY + tableHeight;

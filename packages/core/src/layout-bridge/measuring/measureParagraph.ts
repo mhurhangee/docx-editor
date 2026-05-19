@@ -300,6 +300,32 @@ function findWordBreaks(text: string): number[] {
 const DEFAULT_TAB_WIDTH = 48;
 
 /**
+ * When a float's wrap margins consume the entire content width (or more),
+ * there is no horizontal strip beside it for body text. Word renders the
+ * following lines at full content width instead of squeezing them into a
+ * 1-pixel column. Unchecked margins from near-full-width tables/images can
+ * exceed contentWidth and collapse every line to ~1 glyph (the "single
+ * character per line after a wide floating table" bug).
+ *
+ * Returned margins are zeroed when:
+ * - either side alone is >= contentWidth (no strip on that side at all), or
+ * - their sum is >= contentWidth (no strip exists between the two sides).
+ */
+export function clampFloatingWrapMargins(
+  leftMargin: number,
+  rightMargin: number,
+  contentWidth: number
+): { leftMargin: number; rightMargin: number } {
+  const cw = Math.max(1, contentWidth);
+  const lm = Math.max(0, leftMargin);
+  const rm = Math.max(0, rightMargin);
+  if (lm >= cw || rm >= cw || lm + rm >= cw) {
+    return { leftMargin: 0, rightMargin: 0 };
+  }
+  return { leftMargin: lm, rightMargin: rm };
+}
+
+/**
  * Measure a paragraph block and compute line breaks
  *
  * @param block - The paragraph block to measure

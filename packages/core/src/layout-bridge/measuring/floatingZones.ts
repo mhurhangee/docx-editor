@@ -1,4 +1,5 @@
 import type { WrapTextDirection } from '../../layout-engine/types';
+import { clampFloatingWrapMargins } from './measureParagraph';
 
 export interface FloatingExclusionRect {
   /** Which side the object is on for simple one-sided wrapping. */
@@ -66,7 +67,19 @@ export function rectsToFloatingZones(
       rightMargin = rightObjectMargin(rectLeft, contentWidth);
     }
 
-    return { leftMargin, rightMargin, topY: rectTop, bottomY: rectBottom, segments };
+    // Clamp margins that exceed contentWidth (near-full-width floats whose
+    // outer edge sits past the content area). Without this, body text after
+    // the float collapses to ~1 glyph per line. Segments-based wrapping
+    // (centered both-sides) already keeps leftMargin/rightMargin at 0, so
+    // the clamp is a no-op there.
+    const clamped = clampFloatingWrapMargins(leftMargin, rightMargin, contentWidth);
+    return {
+      leftMargin: clamped.leftMargin,
+      rightMargin: clamped.rightMargin,
+      topY: rectTop,
+      bottomY: rectBottom,
+      segments,
+    };
   });
 }
 

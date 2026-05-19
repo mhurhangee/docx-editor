@@ -37,6 +37,7 @@ export {
   measureParagraph,
   measureParagraphs,
   getRunCharWidths,
+  clampFloatingWrapMargins,
   type FloatingImageZone,
   type MeasureParagraphOptions,
 } from './measureParagraph';

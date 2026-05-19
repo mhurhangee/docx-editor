@@ -8,6 +8,12 @@
 export function buildFontString(style: FontStyle): string;
 
 // @public
+export function clampFloatingWrapMargins(leftMargin: number, rightMargin: number, contentWidth: number): {
+    leftMargin: number;
+    rightMargin: number;
+};
+
+// @public
 export function clearAllCaches(): void;
 
 // @public
