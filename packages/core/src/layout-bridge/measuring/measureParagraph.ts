@@ -31,12 +31,16 @@ import {
   measureRun,
   getFontMetrics,
   ptToPx,
-  twipsToPx,
   type FontStyle,
   type FontMetrics,
 } from './measureContainer';
 
 import { DEFAULT_SINGLE_LINE_RATIO } from '../../utils/fontResolver';
+import {
+  calculateTabWidth,
+  pixelsToTwips,
+  type TabContext,
+} from '../../prosemirror/utils/tabCalculator';
 
 // Default values - match OOXML spec defaults
 const DEFAULT_FONT_SIZE = 11; // 11pt (Word 2007+ default)
@@ -49,26 +53,6 @@ const DEFAULT_LINE_HEIGHT_MULTIPLIER = 1.0; // OOXML spec default: single spacin
 // Floating-point tolerance for line breaking (0.5px)
 // Prevents premature line breaks due to measurement rounding
 const WIDTH_TOLERANCE = 0.5;
-
-/**
- * Compute the width a tab character should advance to reach the next tab stop.
- */
-function computeTabWidth(
-  currentPos: number,
-  tabStops: { pos: number; val: string }[] | undefined
-): number {
-  if (tabStops && tabStops.length > 0) {
-    for (const stop of tabStops) {
-      const stopPx = twipsToPx(stop.pos);
-      if (stopPx > currentPos + 0.5) {
-        return Math.max(1, stopPx - currentPos);
-      }
-    }
-  }
-  // No matching stop — advance to next default interval
-  const remainder = currentPos % DEFAULT_TAB_WIDTH;
-  return Math.max(1, remainder < 0.5 ? DEFAULT_TAB_WIDTH : DEFAULT_TAB_WIDTH - remainder);
-}
 
 /**
  * Find the longest prefix of `text` that fits within `maxWidth` pixels.
@@ -320,11 +304,6 @@ function findWordBreaks(text: string): number[] {
 
   return breaks;
 }
-
-/**
- * Default tab width in pixels (0.5 inch at 96 DPI)
- */
-const DEFAULT_TAB_WIDTH = 48;
 
 /**
  * When a float's wrap margins consume the entire content width (or more),
@@ -680,10 +659,22 @@ export function measureParagraph(
       const style = runToFontStyle(run);
       updateMaxFont(style);
 
-      // Compute tab width: advance to the next tab stop position.
-      const tabStops = attrs?.tabs;
-      const currentPos = currentLine.width + (currentLine.leftOffset ?? 0);
-      let tabWidth = computeTabWidth(currentPos, tabStops);
+      const followingWidth = measureInlineWidthAfterTab(runs, runIndex);
+
+      // Tab width comes from the shared tab-stop model (`calculateTabWidth` —
+      // computeTabStops + alignment) that the painter also uses, so the
+      // measurer and the painter agree on line widths. `calculateTabWidth`
+      // works in content-area coordinates (tab stops are measured from the
+      // content-area left edge), so the indent and any first-line offset are
+      // added in; the line wrap math further down stays indent-relative.
+      const lineX = currentLine.width + (currentLine.leftOffset ?? 0);
+      const isFirstLine = lines.length === 0;
+      const contentX = indentLeft + (isFirstLine ? firstLineOffset : 0) + lineX;
+      const tabContext: TabContext = {
+        explicitStops: attrs?.tabs,
+        leftIndent: pixelsToTwips(indentLeft),
+      };
+      let tabWidth = calculateTabWidth(contentX, tabContext, { followingWidth }).width;
 
       // When the tab targets a position past the line edge — Word's TOC
       // styles routinely author right tab stops a hair past the page margin
@@ -691,9 +682,8 @@ export function measureParagraph(
       // follow (the page number after a TOC leader). Without this, the wrap
       // check below trips and the next line gets the tab + page number
       // alone, with the dots filling the whole new line.
-      if (currentPos + tabWidth > currentLine.availableWidth + WIDTH_TOLERANCE) {
-        const followingWidth = measureInlineWidthAfterTab(runs, runIndex);
-        const clamped = currentLine.availableWidth - currentPos - followingWidth;
+      if (lineX + tabWidth > currentLine.availableWidth + WIDTH_TOLERANCE) {
+        const clamped = currentLine.availableWidth - lineX - followingWidth;
         if (clamped > 1) {
           tabWidth = clamped;
         }

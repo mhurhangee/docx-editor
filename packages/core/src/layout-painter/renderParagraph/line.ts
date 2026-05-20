@@ -396,20 +396,31 @@ export function renderLine(
     const run = runsForLine[i];
 
     if (isTabRun(run) && tabContext) {
-      // Get text following this tab for alignment calculations
+      // Measure the content after this tab so end/center/decimal stops can
+      // anchor it to the stop. Per-run measurement (not a single-font pass)
+      // keeps the tab width accurate when trailing runs differ in font/size.
+      const followingWidth = measureFollowingContentWidth(
+        runsForLine,
+        i,
+        measureText,
+        options?.context
+      );
       const followingText = getTextAfterTab(runsForLine, i, options?.context);
+      const decimalIndex = followingText.indexOf('.');
+      const decimalPrefixWidth =
+        decimalIndex >= 0 ? measureText(followingText.slice(0, decimalIndex)) : 0;
 
       // Calculate tab width based on current position
-      const tabResult = calculateTabWidth(currentX, tabContext, followingText, measureText);
+      const tabResult = calculateTabWidth(currentX, tabContext, {
+        followingWidth,
+        decimalPrefixWidth,
+      });
 
       // Right-tab anchor (TOC pattern): when an end-aligned tab's stop is at
       // the line's right edge, let flex layout pin the trailing content there
       // (tab gets flex: 1) — sidesteps canvas-vs-DOM measurement drift.
       const lineRightEdgeX = options?.lineRightEdgePx;
-      const followingWidthForCheck =
-        lineRightEdgeX !== undefined
-          ? measureFollowingContentWidth(runsForLine, i, measureText, options?.context)
-          : 0;
+      const followingWidthForCheck = followingWidth;
       // Gated to the last tab on the line — a trailing tab after a flex-anchored
       // item would push the anchor left.
       let hasFollowingTab = false;
