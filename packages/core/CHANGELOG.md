@@ -1,5 +1,38 @@
 # @eigenpal/docx-editor-core
 
+## 1.3.0
+
+### Minor Changes
+
+- 5e51a9b: Fix the caret, drag-selection highlight, and table cell-selection highlight appearing in the header while editing the footer. The active header/footer is now resolved per section, so they render in the region being edited. The header/footer caret also stays glued to the text while scrolling instead of drifting away. The hovered region shows a text cursor in edit mode, and the inactive region shows a normal arrow. Fixes #671
+
+  The `@public` `computeHfCaretRectFromView` and `computeHfSelectionRectsFromView` (exported from `@eigenpal/docx-editor-core/layout-bridge`) now take a required `section: 'header' | 'footer'` argument.
+
+- 1be9cf5: Edit and track-change footnote and endnote bodies.
+
+  Note bodies are now serialized on save, so edits and tracked changes (`w:ins` /
+  `w:del`) inside footnotes and endnotes persist instead of being dropped — the
+  run model preserves the separator markers and the in-body auto-number marks, and
+  `repackDocx` writes `word/footnotes.xml` / `word/endnotes.xml` from the model.
+  `DocxReviewer.getChanges()` gains `includeFootnotes` / `includeEndnotes` options;
+  when set, tracked changes inside note bodies are reported with `noteId` /
+  `noteType`.
+
+- 0f3eb97: Fix watermark fidelity when saving to OOXML. Picture watermarks applied across a document's headers now bind each header to its own image relationship (previously the same relationship id was reused across header parts, which could break the image on title or even pages). Watermarks now also appear on title pages and even pages by creating the first/even header parts a section displays but lacks, without disturbing existing header inheritance. Picture watermarks keep the image's aspect ratio instead of being forced into a square.
+- eaa6f7f: Add MS Word–style watermarks. Watermarks in opened documents now render behind the body content on every page, and a new Insert → Watermark dialog lets you add, edit, or remove text watermarks (preset or custom, with font, color, diagonal/horizontal layout, and semitransparent options) and picture watermarks (with scale and washout). Watermarks round-trip back to valid OOXML so Word shows the same result.
+
+### Patch Changes
+
+- 15966fc: Stop squashing anchored images that sit near the right edge of the page. A floating image positioned so its width reaches into the page margin (e.g. a logo flush to the top-right) was being capped to the remaining content width by the global `img { max-width: 100% }` reset and then stretched against its fixed height. Painted floating images now keep their exact OOXML size.
+- 2003cec: Honor an anchored text box's horizontal position in headers and footers. A text box anchored centered relative to the page (e.g. a "For Internal Use" classification banner) now renders centered instead of pinned to the left.
+- cb5f622: Preserve mid-body section breaks (`w:pPr/w:sectPr`) on headless roundtrip. A parseDocx → repackDocx roundtrip no longer collapses a multi-section document down to its final section. Fixes #680.
+- 5fcca3b: Content controls (`w:sdt`) inside footnote and endnote bodies now round-trip through the editable model instead of freezing the whole note to a verbatim copy. Notes whose only block-level construct is a content control stay fully editable; the verbatim fallback now applies only to notes carrying block-level bookmarks or `w:customXml`.
+- f73706e: Stop dropping several properties on headless roundtrip. Table row-level conditional formatting (`w:trPr/w:cnfStyle`, e.g. header-row/banding context) is now serialized, matching the cell path. Explicit "off" formatting overrides also survive: a run or paragraph that cancels a style value (`<w:strike w:val="0"/>`, `<w:keepNext w:val="0"/>`, and similar for doubleStrike, smallCaps, allCaps, outline, shadow, emboss, imprint, vanish, rtl, cs, keepLines, contextualSpacing, pageBreakBefore, suppressLineNumbers, suppressAutoHyphens, bidi) previously serialized to nothing and silently re-inherited the style value.
+- 0d5beed: Fix long content in a table row getting cut off / hidden instead of flowing across pages. A table cell now measures its stacked paragraphs the way it paints them — collapsing adjacent paragraph before/after spacing (like Word) instead of adding it — so the row's height matches what's rendered and page breaks land on whole lines instead of slicing a line in two. Selecting text across a table that spans a page break no longer scatters selection highlights into the gap between pages, and contextual spacing is now suppressed inside table cells. Fixes #570.
+- 5b38696: Render vertically-merged table cells like Word when a table crosses a page. Merged cells now keep their column and borders on the continuation page (instead of disappearing and shifting the other cells), and a tall merged cell flows its content across the page break (the row breaks mid-content like Word, honoring `w:cantSplit`). Each fragment closes with a border on the cut edge at the page break — including the merged column when it spans the boundary — and horizontal cell borders no longer render unevenly thick due to sub-pixel positioning. Fixes #666.
+- 15966fc: Render anchored text boxes with `topAndBottom` wrapping at their OOXML position instead of in the body flow. A title banner pinned to the top of the page (a shape with `wp:wrapTopAndBottom` and a page-relative vertical anchor) now sits flush at the page top with the body text flowing below it, matching Word, instead of being dropped into the text where its anchor paragraph happens to fall.
+- f3d6861: Fix text selection not showing in Vue headers and footers. Selecting text while editing a header or footer now paints the highlight (the body overlay was suppressed in HF mode but the HF rects were never drawn), and double/triple-click word and paragraph selection resolves against the header/footer text instead of a body run at the same position. On multi-page documents, the caret and selection now render on the header/footer instance being edited rather than always on page one's copy. Fixes #691
+
 ## 1.2.1
 
 ### Patch Changes
