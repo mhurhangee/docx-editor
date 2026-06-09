@@ -1,5 +1,15 @@
 # @eigenpal/docx-editor-core
 
+## 1.3.3
+
+### Patch Changes
+
+- bf748c0: Honor an explicit `w:header="0"` / `w:footer="0"` (header/footer pinned to the page edge) instead of replacing the 0 distance with the 0.5in default. The wrong default over-reserved the header band and could push content onto an extra page versus Word. Fixes #740.
+- 15d4f39: Fix header content overlapping the body when a header contains a floating text box (e.g. a centered banner). The floating box is now positioned without pushing the in-flow header paragraphs below it — so a centered banner sits beside the surrounding header text and the body no longer overlaps the header on multi-page documents. Inline and top-and-bottom boxes still reserve vertical space.
+- 06fa96b: Fix list-marker alignment when a list paragraph's direct indent has a `hanging` value larger than its `left` indent. The marker now hangs into the left margin to align with the surrounding text (matching Word) instead of being clamped to the content edge and shifted right. Fixes #729.
+- bd704e2: Assign every paragraph a stable id when a document is opened, so block ids and `getSelectionInfo().paraId` work before the first edit. Previously a document without `w14:paraId` had null ids until you typed or added a comment. Fixes #738.
+- 30df527: Honor an explicit `0` for layout offsets that were previously treated as "unset". A full-bleed page margin (`w:pgMar w:top/left="0"`) no longer snaps to the 1-inch default, and a text-wrapping image pinned flush to the text (`w:distL/distR="0"`) no longer opens a phantom 12px gap. Generalizes the #740 header/footer fix behind a shared nullish helper and a documented size-vs-offset rule, so the falsy-zero trap can't recur.
+
 ## 1.3.2
 
 ### Patch Changes
