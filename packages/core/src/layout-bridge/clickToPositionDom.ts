@@ -562,10 +562,16 @@ export function getCaretPositionFromDom(
       const lineEl = spanEl.closest('.layout-line');
       const lineHeight = lineEl ? (lineEl as HTMLElement).offsetHeight : 16;
 
+      // Caret height tracks the run AT the cursor, not the line box: on a line
+      // with mixed font sizes the line box is as tall as the largest run, but
+      // the caret should match the font where the insertion point sits, like
+      // Word (#748). The collapsed range's rect already reports the per-run
+      // font box (and its top is baseline-aligned), so use it; fall back to the
+      // line height if the browser returns a zero-height rect.
       return {
         x: rangeRect.left - overlayRect.left,
         y: rangeRect.top - overlayRect.top,
-        height: lineHeight,
+        height: rangeRect.height || lineHeight,
         pageIndex,
       };
     }
