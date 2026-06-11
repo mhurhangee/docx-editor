@@ -12,6 +12,7 @@ import type {
   MeasuredLine,
   Run,
   ImageRun,
+  LineBreakRun,
   TabStop,
 } from '../../layout-engine/types';
 import type { RenderContext } from '../renderPage';
@@ -37,6 +38,7 @@ import {
   renderLineBreakRun,
   renderFieldRun,
   renderRun,
+  applyPmPositions,
 } from './runs';
 
 /**
@@ -587,6 +589,24 @@ export function renderLine(
       // Fallback for unknown run types
       const runEl = renderRun(run, doc, options?.context);
       lineEl.appendChild(runEl);
+    }
+  }
+
+  // A line whose only run is a line break (a blank row produced by consecutive
+  // `<w:br/>`) has no positioned text span — its PM position lives on the `<br>`,
+  // which the click/caret/visual-line resolvers don't read (they look for
+  // `span[data-pm-start]`). Without a positioned span, those resolvers fall back
+  // to the paragraph's start, so clicks, the caret, and arrow navigation all
+  // collapse onto the first line of the paragraph. Emit a zero-width positioned
+  // marker carrying the break's position so the existing resolvers can locate it.
+  if (!lineEl.querySelector('span[data-pm-start][data-pm-end]')) {
+    const lineBreakRun = runsForLine.find(isLineBreakRun) as LineBreakRun | undefined;
+    if (lineBreakRun?.pmStart !== undefined) {
+      const marker = doc.createElement('span');
+      marker.className = PARAGRAPH_CLASS_NAMES.run;
+      applyPmPositions(marker, lineBreakRun.pmStart, lineBreakRun.pmStart);
+      marker.textContent = '\u200B';
+      lineEl.insertBefore(marker, lineEl.firstChild);
     }
   }
 
