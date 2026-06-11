@@ -1,6 +1,6 @@
 {
   "name": "@eigenpal/docx-editor-core",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "sideEffects": false,
   "description": "Framework-agnostic core for DOCX parsing, editing, and rendering",
   "main": "./dist/core.js",

@@ -1,5 +1,15 @@
 # @eigenpal/docx-editor-core
 
+## 1.4.0
+
+### Minor Changes
+
+- 1ab8b30: Image resize: drag a corner handle to scale (keeping aspect ratio) or an edge handle to stretch one side (width or height) and deliberately change the aspect ratio. Selection handles are now Word-style white dots. Inserted images keep their aspect ratio — a wide image dropped into a table cell or a narrow column now scales down to fit while staying in proportion, instead of squashing or overflowing the page. Fixes #266.
+
+### Patch Changes
+
+- 28a521a: Fix the text caret being as tall as the largest font on a line. The caret now matches the font size at the insertion point (like Word) instead of the whole line box, so clicking into small text on a line that also has large text shows a correctly-sized caret. Affects React and Vue. Fixes #748.
+
 ## 1.3.3
 
 ### Patch Changes
