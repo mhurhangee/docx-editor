@@ -201,6 +201,13 @@ export function textFormattingToMarks(
     marks.push(schema.mark('textEffect', { effect: formatting.effect }));
   }
 
+  // Character-style reference (w:rStyle). The style's formatting is already
+  // baked into the direct marks above via resolveTextFormatting; this only
+  // carries the named reference so `<w:rStyle>` survives the round-trip.
+  if (formatting.styleId) {
+    marks.push(schema.mark('runStyle', { styleId: formatting.styleId }));
+  }
+
   return marks;
 }
 

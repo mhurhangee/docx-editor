@@ -167,6 +167,10 @@ export function marksToTextFormatting(marks: readonly Mark[]): TextFormatting {
         formatting.effect = mark.attrs.effect || 'blinkBackground';
         break;
 
+      case 'runStyle':
+        if (mark.attrs.styleId) formatting.styleId = mark.attrs.styleId as string;
+        break;
+
       // hyperlink is handled separately
     }
   }

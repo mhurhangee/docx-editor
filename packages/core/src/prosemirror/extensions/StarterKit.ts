@@ -43,6 +43,7 @@ import {
   TextOutlineExtension,
 } from './marks/TextEffectsExtensions';
 import { HiddenExtension, RtlExtension, TextEffectExtension } from './marks/HiddenTextExtensions';
+import { RunStyleExtension } from './marks/RunStyleExtension';
 
 // Nodes
 import { HardBreakExtension } from './nodes/HardBreakExtension';
@@ -131,6 +132,7 @@ export function createStarterKit(options: StarterKitOptions = {}): AnyExtension[
   add('textOutline', TextOutlineExtension());
   add('hidden', HiddenExtension());
   add('rtl', RtlExtension());
+  add('runStyle', RunStyleExtension());
   add('textEffect', TextEffectExtension());
   add('comment', CommentExtension());
   add('insertion', InsertionExtension());
