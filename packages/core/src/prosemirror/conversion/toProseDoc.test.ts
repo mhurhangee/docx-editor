@@ -307,3 +307,87 @@ describe('toProseDoc — hyperlink preserves non-text inline content', () => {
     expect(contentTypes).toEqual(['text', 'tab', 'text', 'tab', 'text']);
   });
 });
+
+describe('toProseDoc — trailing paragraph after isolating content (#861)', () => {
+  function topLevelTypes(pmDoc: ReturnType<typeof toProseDoc>): string[] {
+    const types: string[] = [];
+    pmDoc.forEach((n) => types.push(n.type.name));
+    return types;
+  }
+
+  test('appends a trailing paragraph when the document ends with a table', () => {
+    // A `table` is isolating, so without a following paragraph the caret can
+    // never land below it — the user cannot add text after a trailing table.
+    const pmDoc = toProseDoc(makeDocument(makeTable([makeCell()])));
+    expect(topLevelTypes(pmDoc)).toEqual(['table', 'paragraph']);
+    expect(pmDoc.lastChild?.childCount).toBe(0); // the appended paragraph is empty
+  });
+
+  test('appends a trailing paragraph when the document ends with an in-flow text box', () => {
+    // A `textBox` is isolating too: an in-flow text box is emitted as a bare
+    // top-level node (its empty host paragraph is dropped), so a document
+    // ending in one needs a trailing paragraph for the caret, same as a table.
+    const doc: Document = {
+      package: {
+        document: {
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'run',
+                  content: [
+                    {
+                      type: 'shape',
+                      shape: {
+                        type: 'shape',
+                        shapeType: 'rect',
+                        size: { width: 914400, height: 914400 },
+                        // Inline wrap → in-flow text box (not anchored), so it is
+                        // emitted as a trailing top-level `textBox` node.
+                        wrap: { type: 'inline' },
+                        textBody: {
+                          content: [
+                            {
+                              type: 'paragraph',
+                              content: [
+                                { type: 'run', content: [{ type: 'text', text: 'boxed' }] },
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const pmDoc = toProseDoc(doc);
+    expect(topLevelTypes(pmDoc)).toEqual(['textBox', 'paragraph']);
+    expect(pmDoc.lastChild?.childCount).toBe(0);
+  });
+
+  test('does not append when the document already ends with a paragraph', () => {
+    const doc: Document = {
+      package: {
+        document: {
+          content: [
+            makeTable([makeCell()]),
+            {
+              type: 'paragraph',
+              content: [{ type: 'run', content: [{ type: 'text', text: 'x' }] }],
+            },
+          ],
+        },
+      },
+    };
+    const pmDoc = toProseDoc(doc);
+    // Exactly one trailing paragraph — no double-append.
+    expect(topLevelTypes(pmDoc)).toEqual(['table', 'paragraph']);
+    expect(pmDoc.lastChild?.textContent).toBe('x');
+  });
+});

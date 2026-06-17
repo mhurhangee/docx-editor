@@ -108,12 +108,15 @@ export function toProseDoc(document: Document, options?: ToProseDocOptions): PMN
     nodes.push(schema.node('paragraph', {}, []));
   }
 
-  // Guarantee a text-cursor position after a trailing block-level content
-  // control. A `blockSdt` is `isolating`, so if it is the doc's last node the
-  // caret cannot land after it (no gapcursor) and the user can never type
-  // outside the control — the common "whole body wrapped in an SDT" case.
-  // Word likewise always keeps a body-final paragraph after such content.
-  if (nodes[nodes.length - 1]?.type.name === 'blockSdt') {
+  // Guarantee a text-cursor position after trailing isolating block content.
+  // An `isolating` node (table, textBox, blockSdt) cannot have the caret land
+  // after it when it is the doc's last node (there is no gapcursor plugin), so
+  // the user can never type below it — e.g. a document whose final element is a
+  // signature table, a floating text box, or a body wrapped in a content
+  // control. Word likewise always keeps a body-final paragraph after such
+  // content (OOXML forbids a body ending in a table), so emitting one here is
+  // faithful and round-trips correctly.
+  if (nodes[nodes.length - 1]?.type.spec.isolating) {
     nodes.push(schema.node('paragraph', {}, []));
   }
 
