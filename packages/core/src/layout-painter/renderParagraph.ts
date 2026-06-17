@@ -359,19 +359,16 @@ export function renderParagraphFragment(
     const lineLeftOffset = line.leftOffset ?? 0;
     const lineRightOffset = line.rightOffset ?? 0;
 
-    // For first line, adjust available width for hanging/firstLine indent
-    // Measurement uses: baseFirstLineWidth = bodyContentWidth - (firstLine - hanging)
-    // So hanging gives MORE width, firstLine gives LESS width
-    let lineAvailableWidth = availableWidth;
-    if (isFirstLine) {
-      const hasHangingIndent = indent?.hanging && indent.hanging > 0;
-      const hasFirstLineIndent = indent?.firstLine && indent.firstLine > 0;
-      if (hasHangingIndent && indent?.hanging) {
-        lineAvailableWidth = availableWidth + indent.hanging;
-      } else if (hasFirstLineIndent && indent?.firstLine) {
-        lineAvailableWidth = availableWidth - indent.firstLine;
-      }
-    }
+    // The justify box width (and float constraint) is the full content width on
+    // every line, including the first. The first line's hanging/firstLine shift
+    // is realized purely by `text-indent` below: text-indent moves the line's
+    // START, but justify still stretches to the content box's right edge. If we
+    // also narrowed the box by `firstLine` (or widened it by `hanging`) the
+    // double-count would leave the first line's right edge short of (or past)
+    // the margin while body lines reached it. Measurement already accounts for
+    // the indent when deciding how much text fits on the first line; that is a
+    // separate concern from the stretch target used here.
+    const lineAvailableWidth = availableWidth;
 
     if (canRenderSplitLineAroundFloatingObject(line, block)) {
       const splitLineEl = doc.createElement('div');
