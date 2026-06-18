@@ -1,5 +1,18 @@
 # @eigenpal/docx-editor-core
 
+## 1.8.0
+
+### Minor Changes
+
+- a1f4537: Render fonts embedded in a DOCX. Fonts a document carries in `word/fonts/*` are now de-obfuscated and loaded automatically, so it displays in its authored faces instead of a fallback. Fonts the document uses that the browser can render (embedded or installed on the system) also appear in the toolbar font picker under a "Document fonts" group.
+- 114e83e: Newly inserted tables now adopt the document's default table style. When a document declares a default table style (settings `w:defaultTableStyle`, otherwise the table style marked default), inserting a table from the toolbar or via the agent API gives it that style's borders, shading, cell margins, and header/banding instead of a plain black grid. Documents without a default table style keep the previous thin black border.
+
+### Patch Changes
+
+- 27740e1: Respect a document's own paragraph defaults instead of forcing the default-template spacing. A DOCX that ships `w:docDefaults` but no `Normal` style (common in generated files) no longer has 8pt after-spacing and 1.08 line spacing injected, so table rows and other unstyled paragraphs render at the compact height the document specifies. New and programmatically created content inherits the document's own `Normal`/`docDefaults`.
+
+  Preserve a complex field's run formatting (font size, color) when the field has no separate result run. A footer `PAGE` number whose `w:rPr` lives on the field run now keeps the surrounding text's size and color instead of falling back to the default.
+
 ## 1.7.0
 
 ### Minor Changes
