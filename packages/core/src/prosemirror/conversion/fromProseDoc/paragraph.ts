@@ -292,62 +292,91 @@ function takeTextRunSlice(
 /**
  * Scan paragraph PM node for comment marks and insert commentRangeStart/End
  * markers in the content array for round-trip serialization.
+ *
+ * A comment range must serialize as exactly ONE commentRangeStart/End pair per
+ * comment id, spanning from the first marked child to the last. We deliberately
+ * span any intervening child that lacks the mark (e.g. a tracked-change run
+ * inserted into the middle of a commented range) rather than closing and
+ * reopening the range, which would emit two ranges for the same id — invalid
+ * OOXML that Word reports as unreadable content (issue #914).
  */
 function insertCommentRanges(content: ParagraphContent[], paragraph: PMNode): ParagraphContent[] {
-  // Collect which comment IDs appear as marks on child nodes
-  const commentIds = new Set<number>();
+  // First pass: for each comment id, record the first and last child index that
+  // carries the mark. Iteration order matches the content walk below.
+  const firstIndex = new Map<number, number>();
+  const lastIndex = new Map<number, number>();
+  let scanIndex = 0;
   paragraph.forEach((node) => {
     for (const mark of node.marks) {
       if (mark.type.name === 'comment') {
-        commentIds.add(mark.attrs.commentId as number);
+        const cid = mark.attrs.commentId as number;
+        if (!firstIndex.has(cid)) firstIndex.set(cid, scanIndex);
+        lastIndex.set(cid, scanIndex);
       }
     }
+    scanIndex++;
   });
 
-  if (commentIds.size === 0) return content;
+  if (firstIndex.size === 0) return content;
 
-  // For each comment ID, find the first and last content item that belongs to it
-  // and wrap with commentRangeStart/End
+  // Invert into per-child-index start/end lists. When several ranges share a
+  // boundary we order them so that nested ranges stay well-formed: at a shared
+  // start, the longer-spanning range opens first (outermost); at a shared end,
+  // the later-starting range closes first (innermost). Ties break by id so the
+  // output is deterministic. Overlapping (non-nested) ranges are still valid
+  // OOXML; this just keeps the common nested case balanced.
+  const ids = [...firstIndex.keys()];
+  const byStart = [...ids].sort((a, b) => {
+    const fa = firstIndex.get(a)!;
+    const fb = firstIndex.get(b)!;
+    if (fa !== fb) return fa - fb;
+    const la = lastIndex.get(a)!;
+    const lb = lastIndex.get(b)!;
+    if (la !== lb) return lb - la;
+    return a - b;
+  });
+  const byEnd = [...ids].sort((a, b) => {
+    const la = lastIndex.get(a)!;
+    const lb = lastIndex.get(b)!;
+    if (la !== lb) return la - lb;
+    const fa = firstIndex.get(a)!;
+    const fb = firstIndex.get(b)!;
+    if (fa !== fb) return fb - fa;
+    return b - a;
+  });
+
+  const startsAt = new Map<number, number[]>();
+  for (const cid of byStart) {
+    const idx = firstIndex.get(cid)!;
+    (startsAt.get(idx) ?? (startsAt.set(idx, []), startsAt.get(idx)!)).push(cid);
+  }
+  const endsAt = new Map<number, number[]>();
+  for (const cid of byEnd) {
+    const idx = lastIndex.get(cid)!;
+    (endsAt.get(idx) ?? (endsAt.set(idx, []), endsAt.get(idx)!)).push(cid);
+  }
+
   const result: ParagraphContent[] = [];
-  const openedComments = new Set<number>();
   const cursor = { index: 0 };
+  let nodeIndex = 0;
 
   paragraph.forEach((node) => {
-    const nodeCommentIds = new Set<number>();
-    for (const mark of node.marks) {
-      if (mark.type.name === 'comment') {
-        nodeCommentIds.add(mark.attrs.commentId as number);
-      }
-    }
-
-    // Close comments that are no longer active BEFORE pushing current content,
-    // so commentRangeEnd lands after the last marked node, not after the first unmarked one
-    for (const cid of [...openedComments]) {
-      if (!nodeCommentIds.has(cid)) {
-        result.push({ type: 'commentRangeEnd', id: cid });
-        openedComments.delete(cid);
-      }
-    }
-
-    // Open new comments
-    for (const cid of nodeCommentIds) {
-      if (!openedComments.has(cid)) {
-        result.push({ type: 'commentRangeStart', id: cid });
-        openedComments.add(cid);
-      }
+    for (const cid of startsAt.get(nodeIndex) ?? []) {
+      result.push({ type: 'commentRangeStart', id: cid });
     }
 
     appendContentForNode(result, content, cursor, node);
+
+    for (const cid of endsAt.get(nodeIndex) ?? []) {
+      result.push({ type: 'commentRangeEnd', id: cid });
+    }
+
+    nodeIndex++;
   });
 
   while (cursor.index < content.length) {
     result.push(content[cursor.index]);
     cursor.index++;
-  }
-
-  // Close any remaining open comments
-  for (const cid of openedComments) {
-    result.push({ type: 'commentRangeEnd', id: cid });
   }
 
   return result;
