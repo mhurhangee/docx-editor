@@ -138,6 +138,12 @@ export {
   type FindContentControlsOptions,
 } from './agent/contentControls';
 export {
+  createContentControl,
+  ContentControlCreateError,
+  type CreateContentControlTarget,
+  type NewContentControlProps,
+} from './agent/createContentControl';
+export {
   setContentControlValue,
   formatSdtDate,
   ContentControlValueError,

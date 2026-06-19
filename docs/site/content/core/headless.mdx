@@ -57,6 +57,7 @@ Find and edit Word content controls by `tag`, `alias`, `id`, or `type`. All muta
 | `findContentControls(doc, filter?)` | List matching controls as `ContentControlInfo[]` |
 | `findContentControl(doc, filter)` | First match or `undefined` |
 | `getContentControlText(control)` | Plain text of a control |
+| `createContentControl(doc, target, props?, options?)` | Wrap a text span (inline) or block range in a new control; returns `{ doc, control }` |
 | `setContentControlContent(doc, filter, replacement, options?)` | Fill a rich/plain-text control with a string or `BlockContent[]` |
 | `setContentControlValue(doc, filter, value, options?)` | Set a typed value: `{ kind: 'dropdown' \| 'checkbox' \| 'date', ... }` |
 | `removeContentControl(doc, filter, options?)` | Delete a control, or unwrap with `keepContent: true` |
@@ -64,7 +65,9 @@ Find and edit Word content controls by `tag`, `alias`, `id`, or `type`. All muta
 | `removeRepeatingSectionItem(doc, filter, index)` | Drop one repeating-section item |
 | `formatSdtDate(iso, pattern?)` | Format an ISO date with a `w:dateFormat` pattern |
 
-Errors are typed: `ContentControlNotFoundError`, `ContentControlLockedError`, `ContentControlTypeError`, `ContentControlBoundError`, `ContentControlValueError`, `RepeatingSectionError`.
+`createContentControl` and the `setContent*` mutators reach **inline** controls (including inside table cells, and headers/footers via `{ scope: 'all' }`), not just block-level controls.
+
+Errors are typed: `ContentControlNotFoundError`, `ContentControlLockedError`, `ContentControlTypeError`, `ContentControlBoundError`, `ContentControlValueError`, `ContentControlCreateError`, `RepeatingSectionError`.
 
 ## Watermarks
 

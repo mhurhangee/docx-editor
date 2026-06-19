@@ -156,6 +156,11 @@ export class ContentControlBoundError extends Error {
 }
 
 // @public
+export class ContentControlCreateError extends Error {
+    constructor(message: string);
+}
+
+// @public
 export interface ContentControlFilter {
     alias?: string;
     id?: number;
@@ -278,6 +283,27 @@ export function createCollapsedRange(position: Position_2): Range_2;
 
 // @public
 export function createCommand<T extends AgentCommand>(command: Omit<T, 'id'>): T;
+
+// @public
+export function createContentControl(doc: Document_2, target: CreateContentControlTarget, props?: NewContentControlProps, options?: {
+    force?: boolean;
+}): {
+    doc: Document_2;
+    control: ContentControlInfo;
+};
+
+// @public
+export type CreateContentControlTarget = {
+    kind: 'text';
+    paraId?: string;
+    paragraph?: ContentControlAddress;
+    text: string;
+    occurrence?: number;
+} | {
+    kind: 'blocks';
+    from: ContentControlAddress;
+    to?: ContentControlAddress;
+};
 
 // @public
 export function createDocumentWithText(text: string, options?: Omit<CreateEmptyDocumentOptions, 'initialText'>): Document_2;
@@ -920,6 +946,22 @@ export interface MoveTo {
 }
 
 // @public
+export interface NewContentControlProps {
+    alias?: string;
+    checked?: boolean;
+    dateFormat?: string;
+    id?: number;
+    listItems?: {
+        displayText: string;
+        value: string;
+    }[];
+    lock?: SdtProperties['lock'];
+    sdtType?: SdtType;
+    showingPlaceholder?: boolean;
+    tag?: string;
+}
+
+// @public
 export interface NumberingDefinitions {
     abstractNums: AbstractNumbering[];
     nums: NumberingInstance[];
@@ -1342,6 +1384,7 @@ export function setContentControlContent(doc: Document_2, filter: ContentControl
 // @public
 export function setContentControlValue(doc: Document_2, filter: ContentControlFilter, value: ContentControlValue, options?: {
     force?: boolean;
+    scope?: 'body' | 'all';
 }): Document_2;
 
 // @public

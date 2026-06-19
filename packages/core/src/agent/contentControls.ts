@@ -542,7 +542,7 @@ export class ContentControlKindError extends Error {
 }
 
 /** Type guard: a paragraph-content node that is also valid inside an inline SDT. */
-function isInlineContent(node: Paragraph['content'][number]): node is InlineContent {
+export function isInlineContent(node: Paragraph['content'][number]): node is InlineContent {
   switch (node.type) {
     case 'run':
     case 'hyperlink':
@@ -758,7 +758,7 @@ function rebuildPart(
  * backstop for removals). Throws {@link ContentControlNotFoundError} if nothing
  * matched.
  */
-function applyControlMutation(
+export function applyControlMutation(
   doc: Document,
   filter: ContentControlFilter,
   blockOp: BlockControlOp,

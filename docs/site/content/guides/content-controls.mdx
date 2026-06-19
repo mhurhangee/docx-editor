@@ -74,6 +74,40 @@ A dropdown value must match one of the control's list items (by value or display
 
 In the editor, typed controls also get an interactive trigger at the top-right of their box: it toggles the checkbox, opens the dropdown's item menu, or opens a date picker, each as a normal undoable edit. No wiring required, in both the React and Vue adapters.
 
+## Creating controls
+
+`createContentControl` wraps existing content in a **new** control — the deterministic step that turns a tagged template region into a fillable control. It is pure (returns a new `Document`) and hands back the created control's `ContentControlInfo`:
+
+```ts
+import { createContentControl } from "@eigenpal/docx-editor-core/headless";
+
+// Inline: wrap an exact text span inside a paragraph (located by Word's w14:paraId).
+// Runs are split at the span boundaries with formatting preserved.
+const { doc: d1, control } = createContentControl(
+  doc,
+  { kind: "text", paraId: "0A1B2C3D", text: "[CUSTOMER]" },
+  { tag: "customer", alias: "Customer", sdtType: "plainText" }
+);
+
+// A typed control is created ready to fill — set its structured value afterwards.
+const { doc: d2 } = createContentControl(
+  doc,
+  { kind: "text", paraId: "0A1B2C3D", text: "[DATE]" },
+  { tag: "effective", sdtType: "date", dateFormat: "MMMM d, yyyy" }
+);
+
+// Block: wrap a contiguous range of paragraphs/tables in a block-level control.
+const { doc: d3 } = createContentControl(
+  doc,
+  { kind: "blocks", from: blockAddress, to: blockAddress2 },
+  { tag: "section", alias: "Optional section" }
+);
+```
+
+The control's `w:sdtPr` is synthesized from `props` with a Word-correct element order, and its `w:id` is auto-assigned unique across the document (pass `props.id` to set it yourself). A created control round-trips immediately, so `findContentControl(doc, { tag })` resolves it and a typed control accepts `setContentControlValue`.
+
+Inline text wrapping is the form needed inside table cells and mid-sentence, where block controls aren't allowed. It throws `ContentControlCreateError` when the text/occurrence isn't found, the span overlaps an existing control or crosses a non-run boundary (a hyperlink or field), or a block target resolves inside a table cell (use `{ kind: 'text' }` there instead).
+
 ## Repeating sections
 
 Repeating-section controls (`w15:repeatingSection`) round-trip verbatim, and two helpers manage their items:
@@ -133,7 +167,7 @@ await writeFile("contract-acme.docx", Buffer.from(out));
 
 ## Scope
 
-`findContentControls`, `findContentControl`, `setContentControlContent`, and `removeContentControl` address both **block-level** and **inline** (run-level) controls, including inline controls inside **table cells** (and nested tables). Each result carries a `kind` (`'block'` / `'inline'`), a `location` (`body` or a header/footer part by `rId`), and a structural `address` for the exact node.
+`findContentControls`, `findContentControl`, `setContentControlContent`, `setContentControlValue`, and `removeContentControl` address both **block-level** and **inline** (run-level) controls, including inline controls inside **table cells** (and nested tables), and `createContentControl` likewise creates either kind. Each result carries a `kind` (`'block'` / `'inline'`), a `location` (`body` or a header/footer part by `rId`), and a structural `address` for the exact node.
 
 By default the search covers the main document story only. `scope` widens it:
 
