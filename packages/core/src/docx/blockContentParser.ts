@@ -16,6 +16,8 @@
 
 import type {
   Paragraph,
+  ParagraphContent,
+  Run,
   Shape,
   ShapeContent,
   Theme,
@@ -158,8 +160,6 @@ function enrichParagraphTextBoxes(
   // Early exit: skip paragraphs with no runs (most paragraphs have no text boxes)
   if (paragraph.content.length === 0) return;
 
-  const xmlChildren = getChildElements(paraXml);
-
   // Track which run we're on (to match XML runs with parsed runs)
   let runIndex = 0;
 
@@ -207,32 +207,30 @@ function enrichParagraphTextBoxes(
 
     const shapeContent: ShapeContent = { type: 'shape', shape };
 
-    // Clamp to the last parsed run: runIndex can outrun paragraph.content
-    // when an <w:r> contributes nothing parseable. Best-effort attachment —
-    // anchored boxes are off-flow, so the owning run matters less than
-    // keeping the shape from being dropped.
-    let targetIdx = runIndex;
-    if (targetIdx >= paragraph.content.length) {
-      targetIdx = -1;
-      for (let i = paragraph.content.length - 1; i >= 0; i--) {
-        if (paragraph.content[i].type === 'run') {
-          targetIdx = i;
-          break;
-        }
+    // Best-effort attachment: prefer a top-level run at/before runIndex, but
+    // that index no longer maps 1:1 to paragraph.content once runs are
+    // collected through inline wrappers — a wrapper-nested run shows up as an
+    // inlineSdt/hyperlink item, not a top-level run. Walk back to the nearest
+    // preceding top-level run; if the paragraph has none (the only run lives
+    // inside a wrapper), descend into the parsed content to find the last
+    // reachable run. Anchored boxes are off-flow, so the exact owning run
+    // matters less than not dropping the shape.
+    let targetRun: Run | undefined;
+    for (let i = Math.min(runIndex, paragraph.content.length - 1); i >= 0; i--) {
+      const item = paragraph.content[i];
+      if (item.type === 'run') {
+        targetRun = item;
+        break;
       }
     }
-    if (targetIdx >= 0) {
-      const parsedContent = paragraph.content[targetIdx];
-      if (parsedContent.type === 'run') {
-        parsedContent.content.push(shapeContent);
-      }
+    targetRun ??= findLastReachableRun(paragraph.content);
+    if (targetRun) {
+      targetRun.content.push(shapeContent);
     }
   }
 
-  for (const xmlChild of xmlChildren) {
-    if (getLocalName(xmlChild.name ?? '') !== 'r') continue;
-
-    const runElements = getChildElements(xmlChild);
+  for (const runXml of collectRunsThroughInlineWrappers(paraXml)) {
+    const runElements = getChildElements(runXml);
     for (const runEl of runElements) {
       const localName = getLocalName(runEl.name ?? '');
       if (localName === 'drawing') {
@@ -256,6 +254,64 @@ function enrichParagraphTextBoxes(
 
     runIndex++;
   }
+}
+
+/**
+ * Inline-level wrappers that may contain `w:r` runs (and thus anchored text-box
+ * drawings) without those runs being direct children of the paragraph. Word
+ * stores runs inside structured document tags, hyperlinks, and tracked-change /
+ * smart-tag wrappers. A text box anchored from a run nested in one of these is
+ * otherwise invisible to enrichment and its text is silently dropped at parse.
+ */
+const INLINE_RUN_WRAPPERS = new Set(['sdt', 'hyperlink', 'ins', 'del', 'smartTag']);
+
+/**
+ * Collect a paragraph's `w:r` runs in document order, descending through inline
+ * wrappers (`w:sdt`/`w:sdtContent`, `w:hyperlink`, `w:ins`/`w:del`/`w:smartTag`)
+ * so runs nested inside them are reached too. Direct-child runs are included as
+ * before; only inline containers are recursed into (block-level `w:p`/`w:tbl`
+ * are not, since those carry their own enrichment pass).
+ */
+function collectRunsThroughInlineWrappers(parentEl: XmlElement): XmlElement[] {
+  const runs: XmlElement[] = [];
+  for (const child of getChildElements(parentEl)) {
+    const localName = getLocalName(child.name ?? '');
+    if (localName === 'r') {
+      runs.push(child);
+    } else if (localName === 'sdt') {
+      // Runs live under w:sdtContent, not directly under w:sdt.
+      const sdtContent = findChild(child, 'w', 'sdtContent');
+      if (sdtContent) runs.push(...collectRunsThroughInlineWrappers(sdtContent));
+    } else if (INLINE_RUN_WRAPPERS.has(localName)) {
+      runs.push(...collectRunsThroughInlineWrappers(child));
+    }
+  }
+  return runs;
+}
+
+/**
+ * Find the last {@link Run} reachable in a list of parsed paragraph content,
+ * descending into inline wrapper items (inlineSdt, hyperlink, fields,
+ * tracked-change wrappers) that hold their own `content` runs. Used as the
+ * attachment fallback for an anchored text box whose only run is wrapped — the
+ * paragraph then has no top-level run for the shape to ride on.
+ */
+function findLastReachableRun(content: ParagraphContent[]): Run | undefined {
+  for (let i = content.length - 1; i >= 0; i--) {
+    const item = content[i];
+    if (item.type === 'run') return item;
+    // Wrapper items carry a nested array of runs/wrappers; recurse into it.
+    // Most use `content` (inlineSdt, fields, ins/del/move*); hyperlink uses
+    // `children`. Check both.
+    const nested =
+      (item as { content?: ParagraphContent[]; children?: ParagraphContent[] }).content ??
+      (item as { children?: ParagraphContent[] }).children;
+    if (Array.isArray(nested)) {
+      const run = findLastReachableRun(nested);
+      if (run) return run;
+    }
+  }
+  return undefined;
 }
 
 // ============================================================================
