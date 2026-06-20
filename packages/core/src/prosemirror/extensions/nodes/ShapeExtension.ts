@@ -54,62 +54,81 @@ export interface ShapeAttrs {
   glowRadius?: number;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svgEl<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  attrs?: Record<string, string | number>
+): SVGElementTagNameMap[K] {
+  const el = document.createElementNS(SVG_NS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  return el;
+}
+
 /**
  * Build SVG path for a shape type
  */
-function getShapeSVG(type: string, w: number, h: number): string {
+function getShapeSVG(type: string, w: number, h: number): SVGElement {
   switch (type) {
     case 'ellipse':
     case 'oval':
-      return `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2}" ry="${h / 2}" />`;
+      return svgEl('ellipse', { cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2 });
     case 'roundRect':
-      return `<rect x="0" y="0" width="${w}" height="${h}" rx="${Math.min(w, h) * 0.1}" />`;
+      return svgEl('rect', { x: 0, y: 0, width: w, height: h, rx: Math.min(w, h) * 0.1 });
     case 'triangle':
     case 'isosTriangle':
-      return `<polygon points="${w / 2},0 ${w},${h} 0,${h}" />`;
+      return svgEl('polygon', { points: `${w / 2},0 ${w},${h} 0,${h}` });
     case 'diamond':
-      return `<polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" />`;
+      return svgEl('polygon', { points: `${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}` });
     case 'line':
     case 'straightConnector1':
-      return `<line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" />`;
+      return svgEl('line', { x1: 0, y1: h / 2, x2: w, y2: h / 2 });
     case 'rect':
     default:
-      return `<rect x="0" y="0" width="${w}" height="${h}" />`;
+      return svgEl('rect', { x: 0, y: 0, width: w, height: h });
   }
 }
 
 /**
  * Build SVG gradient <defs> content from shape attrs
  */
-function buildSVGGradientDef(gradId: string, attrs: ShapeAttrs): string {
-  let stops = '';
+function buildSVGGradientDef(gradId: string, attrs: ShapeAttrs): SVGGradientElement | null {
+  let parsed: Array<{ position: number; color: string }>;
   try {
-    const parsed = JSON.parse(attrs.gradientStops || '[]') as Array<{
-      position: number;
-      color: string;
-    }>;
-    stops = parsed
-      .map((s) => `<stop offset="${Math.round(s.position / 1000)}%" stop-color="${s.color}" />`)
-      .join('');
+    parsed = JSON.parse(attrs.gradientStops || '[]');
   } catch {
-    return '';
+    return null;
   }
+  if (!Array.isArray(parsed)) return null;
 
   const gType = attrs.gradientType || 'linear';
+  let gradient: SVGGradientElement;
 
   if (gType === 'radial' || gType === 'rectangular' || gType === 'path') {
-    return `<radialGradient id="${gradId}" cx="50%" cy="50%" r="50%">${stops}</radialGradient>`;
+    gradient = svgEl('radialGradient', { id: gradId, cx: '50%', cy: '50%', r: '50%' });
+  } else {
+    // Linear gradient — convert angle to SVG coordinates
+    const angle = attrs.gradientAngle || 0;
+    const rad = ((angle - 90) * Math.PI) / 180;
+    const x1 = Math.round(50 + 50 * Math.cos(rad + Math.PI));
+    const y1 = Math.round(50 + 50 * Math.sin(rad + Math.PI));
+    const x2 = Math.round(50 + 50 * Math.cos(rad));
+    const y2 = Math.round(50 + 50 * Math.sin(rad));
+    gradient = svgEl('linearGradient', {
+      id: gradId,
+      x1: `${x1}%`,
+      y1: `${y1}%`,
+      x2: `${x2}%`,
+      y2: `${y2}%`,
+    });
   }
 
-  // Linear gradient — convert angle to SVG coordinates
-  const angle = attrs.gradientAngle || 0;
-  const rad = ((angle - 90) * Math.PI) / 180;
-  const x1 = Math.round(50 + 50 * Math.cos(rad + Math.PI));
-  const y1 = Math.round(50 + 50 * Math.sin(rad + Math.PI));
-  const x2 = Math.round(50 + 50 * Math.cos(rad));
-  const y2 = Math.round(50 + 50 * Math.sin(rad));
-
-  return `<linearGradient id="${gradId}" x1="${x1}%" y1="${y1}%" x2="${x2}%" y2="${y2}%">${stops}</linearGradient>`;
+  for (const s of parsed) {
+    gradient.appendChild(
+      svgEl('stop', { offset: `${Math.round(s.position / 1000)}%`, 'stop-color': s.color })
+    );
+  }
+  return gradient;
 }
 
 export const ShapeExtension = createNodeExtension({
@@ -260,13 +279,17 @@ export const ShapeExtension = createNodeExtension({
       domAttrs.style = styles.join('; ');
 
       // Build SVG gradient defs if needed
-      let svgDefs = '';
+      let defs: SVGDefsElement | null = null;
       let fill: string;
 
       if (attrs.fillType === 'gradient' && attrs.gradientStops) {
         const gradId = `grad-${attrs.shapeId || Math.random().toString(36).slice(2, 8)}`;
         fill = `url(#${gradId})`;
-        svgDefs = buildSVGGradientDef(gradId, attrs);
+        const gradient = buildSVGGradientDef(gradId, attrs);
+        if (gradient) {
+          defs = svgEl('defs');
+          defs.appendChild(gradient);
+        }
       } else {
         fill = attrs.fillType === 'none' ? 'none' : attrs.fillColor || '#ffffff';
       }
@@ -274,29 +297,25 @@ export const ShapeExtension = createNodeExtension({
       const strokeWidth = attrs.outlineWidth || 1;
       const strokeColor = attrs.outlineColor || '#000000';
       const strokeDash =
-        attrs.outlineStyle === 'dashed'
-          ? ' stroke-dasharray="8 4"'
-          : attrs.outlineStyle === 'dotted'
-            ? ' stroke-dasharray="2 2"'
-            : '';
+        attrs.outlineStyle === 'dashed' ? '8 4' : attrs.outlineStyle === 'dotted' ? '2 2' : null;
 
-      const svgContent = getShapeSVG(attrs.shapeType || 'rect', w, h);
+      const svg = svgEl('svg', {
+        xmlns: SVG_NS,
+        width: w,
+        height: h,
+        viewBox: `0 0 ${w} ${h}`,
+        style: `fill:${fill};stroke:${strokeColor};stroke-width:${strokeWidth}`,
+      });
+      if (strokeDash) svg.setAttribute('stroke-dasharray', strokeDash);
+      if (defs) svg.appendChild(defs);
+      svg.appendChild(getShapeSVG(attrs.shapeType || 'rect', w, h));
 
-      // Create SVG element as innerHTML
-      const svgHtml =
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" ` +
-        `style="fill:${fill};stroke:${strokeColor};stroke-width:${strokeWidth}${strokeDash}">` +
-        (svgDefs ? `<defs>${svgDefs}</defs>` : '') +
-        svgContent +
-        `</svg>`;
-
-      // Use a span wrapper with innerHTML
       // ProseMirror will handle this as an atom node
       const span = document.createElement('span');
       Object.entries(domAttrs).forEach(([key, value]) => {
         span.setAttribute(key, value);
       });
-      span.innerHTML = svgHtml;
+      span.appendChild(svg);
 
       return { dom: span };
     },
