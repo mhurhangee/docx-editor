@@ -1,5 +1,19 @@
 # @eigenpal/docx-editor-core
 
+## 1.8.3
+
+### Patch Changes
+
+- 88a7650: Support RTL tables with `w:bidiVisual` alignment.
+- 5ce3faa: Escape embedded font-family names before interpolating into the injected `@font-face` stylesheet, and build the print window via DOM APIs instead of `document.write` string concatenation. Prevents CSS injection and print-time XSS from crafted DOCX font names.
+- 5eb0a43: Allowlist URL schemes on hyperlink and image-hyperlink targets parsed from DOCX relationships and pasted HTML; `javascript:`, `data:`, and other non-web schemes are now dropped.
+- 673e917: Render RTL tables (`w:bidiVisual`) with their columns in visual right-to-left order, matching Word. The bidi flag was already parsed and round-tripped, but the on-page painter still drew columns left-to-right, so in a right-to-left table a label cell appeared on the wrong side of the field it labels.
+
+  Fixes #734
+
+- 74e36ef: Build shape SVG via DOM APIs instead of innerHTML, preventing XSS from crafted DOCX shape attributes.
+- 447d5b0: Fix Japanese/CJK IME input garbling text in suggesting mode. Composed text was re-inserted via `handleTextInput`, duplicating surrounding content and marking it as a tracked change. Suggesting mode now stays out of the way during composition and marks the committed text once it settles.
+
 ## 1.8.2
 
 ### Patch Changes
