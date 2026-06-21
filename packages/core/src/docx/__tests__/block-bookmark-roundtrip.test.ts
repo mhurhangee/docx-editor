@@ -217,6 +217,36 @@ describe('block-level bookmark markers (round-trip)', () => {
     expect(countMatches(out, /w:name="a"/g)).toBe(1);
   });
 
+  test('(7) a block SDT whose content is ONLY bookmark markers keeps them', () => {
+    // jedrazb's repro: an sdt wrapping only <w:bookmarkStart/><w:bookmarkEnd/>.
+    // parseBlockContent must insert a placeholder paragraph for the markers to
+    // ride on instead of dropping them when no block was ever pushed.
+    const out = bodyRoundtrip(`
+      <w:sdt>
+        <w:sdtPr><w:tag w:val="ctrl"/></w:sdtPr>
+        <w:sdtContent>
+          <w:bookmarkStart w:id="14" w:name="sdtonly"/>
+          <w:bookmarkEnd w:id="14"/>
+        </w:sdtContent>
+      </w:sdt>
+    `);
+
+    expect(countMatches(out, BOOKMARK_START)).toBe(1);
+    expect(countMatches(out, BOOKMARK_END)).toBe(1);
+    expect(out).toContain('w:name="sdtonly"');
+  });
+
+  test('(7b) a body whose only block-level children are bookmark markers keeps them', () => {
+    const out = bodyRoundtrip(`
+      <w:bookmarkStart w:id="15" w:name="bodyonly"/>
+      <w:bookmarkEnd w:id="15"/>
+    `);
+
+    expect(countMatches(out, BOOKMARK_START)).toBe(1);
+    expect(countMatches(out, BOOKMARK_END)).toBe(1);
+    expect(out).toContain('w:name="bodyonly"');
+  });
+
   test('a block SDT between paragraphs carries its bracketing markers', () => {
     const out = bodyRoundtrip(`
       <w:bookmarkStart w:id="2" w:name="s"/>

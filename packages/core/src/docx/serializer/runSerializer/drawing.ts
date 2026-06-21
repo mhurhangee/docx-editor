@@ -356,7 +356,11 @@ export function serializeShapeContent(content: ShapeContent): string {
   // Build wps:wsp
   const wsp = [
     '<wps:wsp>',
-    `<wps:cNvSpPr${isTextBox || hasText ? ' txBox="1"' : ''}/>`,
+    // Gate the txBox flag on the SAME condition as the `<wps:txbx>` body above
+    // (text presence), so the two never disagree. `isTextBox` is not used here:
+    // no producer sets `shapeType: 'textBox'` (boxes are stored as `rect`), so
+    // OR-ing it in could only emit `txBox="1"` without a matching `<wps:txbx>`.
+    `<wps:cNvSpPr${hasText ? ' txBox="1"' : ''}/>`,
     spPr,
     textBody,
     '</wps:wsp>',

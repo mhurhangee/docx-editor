@@ -93,6 +93,16 @@ export class BlockMarkerCollector {
       this.pending = [];
     }
   }
+
+  /**
+   * Whether any markers are buffered but not yet attached to a block. A caller
+   * can use this to detect a container whose ONLY children are markers (no
+   * paragraph/table/SDT for them to ride on) and insert a placeholder block
+   * before {@link finalize}, so the markers are not silently dropped.
+   */
+  hasPendingMarkers(): boolean {
+    return this.pending.length > 0;
+  }
 }
 
 /**

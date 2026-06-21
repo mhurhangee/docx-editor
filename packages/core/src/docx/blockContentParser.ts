@@ -272,7 +272,9 @@ function enrichParagraphTextBoxes(
  * dedicated `w:sdt` branch in `collectRunsThroughInlineWrappers`, not this set.)
  */
 const INLINE_RUN_WRAPPERS = new Set([
-  'sdt',
+  // `sdt` is intentionally NOT listed: `collectRunsThroughInlineWrappers` has a
+  // dedicated `w:sdt` branch (descending `w:sdtContent`) that runs BEFORE this
+  // set is consulted, so an entry here would be unreachable dead code.
   'hyperlink',
   'ins',
   'del',
@@ -417,6 +419,16 @@ export function parseBlockContent(
     }
     // Section properties (w:sectPr) - handled separately at body level
     // Skip here as we handle it after content parsing
+  }
+
+  // A container whose ONLY children are block-level bookmark markers (no
+  // paragraph/table/SDT) has no block for them to ride on, so finalize() would
+  // drop them. Insert a placeholder empty paragraph and attach them — mirrors
+  // the cell guard in parseCellContent. Guarded on hasPendingMarkers() so a
+  // legitimately empty container (no markers) is not given a spurious paragraph.
+  if (content.length === 0 && markers.hasPendingMarkers()) {
+    content.push({ type: 'paragraph', content: [] });
+    markers.onBlockPushed(content[0]);
   }
 
   // Flush any markers buffered after the last block.
