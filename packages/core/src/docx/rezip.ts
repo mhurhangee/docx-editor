@@ -530,7 +530,10 @@ export function updateCoreProperties(
     // Update dcterms:modified
     if (result.includes('<dcterms:modified')) {
       result = result.replace(
-        /<dcterms:modified[^>]*>[^<]*<\/dcterms:modified>/,
+        // `[^<>]*` (not `[^>]*`) for the attribute span: disallowing `<` stops
+        // the match from gobbling later `<dcterms:modified` text on malformed
+        // core.xml, which is what made this backtrack polynomially.
+        /<dcterms:modified[^<>]*>[^<]*<\/dcterms:modified>/,
         `<dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>`
       );
     } else {

@@ -470,6 +470,19 @@ export function resolveFontFamily(docxFontName: string): ResolvedFont {
   };
 }
 
+// CSS newline characters are illegal inside a quoted string and must be
+// hex-escaped (mirrors `cssStringEscape` in fontLoader.ts).
+const CSS_NEWLINE_ESCAPES: Record<string, string> = { '\n': '\\a ', '\r': '\\d ', '\f': '\\c ' };
+
+/**
+ * Escape a font name for embedding inside a double-quoted CSS string.
+ * Backslashes and quotes are backslash-escaped, CSS newlines are hex-escaped,
+ * so a crafted DOCX font name cannot break out of the quoted value.
+ */
+function escapeQuotedFontName(fontName: string): string {
+  return fontName.replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, (c) => CSS_NEWLINE_ESCAPES[c]);
+}
+
 /**
  * Quote a font name if it contains spaces or special characters
  */
@@ -485,7 +498,7 @@ function quoteFontName(fontName: string): string {
 
   // Quote if contains spaces or special characters
   if (/[\s,'"()]/.test(fontName)) {
-    return `"${fontName.replace(/"/g, '\\"')}"`;
+    return `"${escapeQuotedFontName(fontName)}"`;
   }
 
   return fontName;
