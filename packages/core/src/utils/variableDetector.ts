@@ -417,9 +417,14 @@ export function detectVariablesInTextBox(textBox: TextBox): string[] {
 const VARIABLE_PATTERN = /\{([a-zA-Z_][a-zA-Z0-9_\-\.]*)\}/g;
 
 /**
- * Alternative pattern allowing any content between braces
+ * Alternative pattern allowing any (brace-free) content between braces.
+ *
+ * Uses `[^{}]+` rather than `.+?`: the negated class cannot cross a brace,
+ * which keeps matching linear and removes the polynomial backtracking a lazy
+ * `.+?` exhibits on attacker-controlled text. Variable names never contain
+ * braces, so the matched set is unchanged.
  */
-const VARIABLE_PATTERN_RELAXED = /\{(.+?)\}/g;
+const VARIABLE_PATTERN_RELAXED = /\{([^{}]+)\}/g;
 
 /**
  * Extract variable names from text
