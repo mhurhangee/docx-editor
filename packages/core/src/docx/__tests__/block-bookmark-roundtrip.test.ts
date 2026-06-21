@@ -161,6 +161,26 @@ describe('block-level bookmark markers (round-trip)', () => {
     expect(out).toMatch(/<\/w:p><w:bookmarkEnd w:id="9"\/><w:p>/);
   });
 
+  test('(4b) a table cell containing ONLY bookmark markers (no w:p) keeps them', () => {
+    // A point bookmark in an otherwise-empty cell: the cell has no paragraph,
+    // so parseCellContent inserts the Word-required empty paragraph. The markers
+    // must ride that inserted paragraph rather than being dropped.
+    const out = bodyRoundtrip(`
+      <w:tbl>
+        <w:tr>
+          <w:tc>
+            <w:bookmarkStart w:id="13" w:name="emptycell"/>
+            <w:bookmarkEnd w:id="13"/>
+          </w:tc>
+        </w:tr>
+      </w:tbl>
+    `);
+
+    expect(countMatches(out, BOOKMARK_START)).toBe(1);
+    expect(countMatches(out, BOOKMARK_END)).toBe(1);
+    expect(out).toContain('w:name="emptycell"');
+  });
+
   test('(5) bookmark brackets a table: start before the table, end after it', () => {
     const doc = body(`
       <w:bookmarkStart w:id="11" w:name="t"/>

@@ -259,11 +259,26 @@ function enrichParagraphTextBoxes(
 /**
  * Inline-level wrappers that may contain `w:r` runs (and thus anchored text-box
  * drawings) without those runs being direct children of the paragraph. Word
- * stores runs inside structured document tags, hyperlinks, and tracked-change /
- * smart-tag wrappers. A text box anchored from a run nested in one of these is
- * otherwise invisible to enrichment and its text is silently dropped at parse.
+ * stores runs inside structured document tags, hyperlinks, smart tags, and
+ * tracked-change wrappers (`w:ins`/`w:del`/`w:moveFrom`/`w:moveTo`). A text box
+ * anchored from a run nested in one of these is otherwise invisible to
+ * enrichment and its text is silently dropped at parse.
+ *
+ * This mirrors the inline-wrapper set the paragraph parser descends through
+ * (`paragraphStartsWithRenderedPageBreak` in `paragraphParser/content.ts`); a
+ * wrapper missing here re-introduces the same drop bug for a box anchored inside
+ * it, so keep the two aligned. (`w:sdtContent` is reached via the dedicated
+ * `w:sdt` branch in `collectRunsThroughInlineWrappers`, not this set.)
  */
-const INLINE_RUN_WRAPPERS = new Set(['sdt', 'hyperlink', 'ins', 'del', 'smartTag']);
+const INLINE_RUN_WRAPPERS = new Set([
+  'sdt',
+  'hyperlink',
+  'ins',
+  'del',
+  'moveFrom',
+  'moveTo',
+  'smartTag',
+]);
 
 /**
  * Collect a paragraph's `w:r` runs in document order, descending through inline

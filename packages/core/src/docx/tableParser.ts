@@ -593,16 +593,19 @@ function parseCellContent(
     // Other content types in cells are rare but could be added
   }
 
-  // Flush any markers buffered after the last block.
-  markers.finalize();
-
-  // Ensure at least one empty paragraph (Word requires this)
+  // Ensure at least one empty paragraph (Word requires this). Do this BEFORE
+  // finalize() so a cell whose only children are bookmark markers (no w:p) has
+  // a block for those markers to ride on instead of dropping them.
   if (content.length === 0) {
     content.push({
       type: 'paragraph',
       content: [],
     });
+    markers.onBlockPushed(content[0]);
   }
+
+  // Flush any markers buffered after the last block.
+  markers.finalize();
 
   return content;
 }

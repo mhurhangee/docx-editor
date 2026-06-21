@@ -183,9 +183,7 @@ const RECT_SHAPE_WITH_TEXT: Run = {
           content: [
             {
               type: 'paragraph',
-              content: [
-                { type: 'run', content: [{ type: 'text', text: 'Internal Review Copy' }] },
-              ],
+              content: [{ type: 'run', content: [{ type: 'text', text: 'Internal Review Copy' }] }],
             },
           ],
         },

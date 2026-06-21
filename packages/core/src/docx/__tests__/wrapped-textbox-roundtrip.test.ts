@@ -84,6 +84,13 @@ function hyperlinkWrappedTextBox(label: string): string {
   </w:hyperlink>`;
 }
 
+/** Wrap a text-box run inside a tracked-move wrapper (w:moveTo). */
+function moveToWrappedTextBox(label: string): string {
+  return `<w:moveTo w:id="7" w:author="A" w:date="2020-01-01T00:00:00Z">
+    <w:r>${textBoxDrawing(label)}</w:r>
+  </w:moveTo>`;
+}
+
 function bodyXml(paragraphInner: string): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:document ${NS}><w:body><w:p>${paragraphInner}</w:p></w:body></w:document>`;
@@ -146,6 +153,12 @@ describe('wrapper-nested text boxes — parse + serialize round-trip', () => {
     const body = parseDocumentBody(bodyXml(hyperlinkWrappedTextBox('Link Box')));
     expect(shapeTexts(body.content)).toEqual(['Link Box']);
     expect(serializeDocumentBody(body)).toContain('Link Box');
+  });
+
+  test('body: text box anchored from a run inside a w:moveTo wrapper survives', () => {
+    const body = parseDocumentBody(bodyXml(moveToWrappedTextBox('Move Box')));
+    expect(shapeTexts(body.content)).toEqual(['Move Box']);
+    expect(serializeDocumentBody(body)).toContain('Move Box');
   });
 
   test('header: sdt-nested text box survives parse + serialize', () => {
