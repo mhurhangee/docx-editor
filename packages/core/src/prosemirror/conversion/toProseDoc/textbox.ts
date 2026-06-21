@@ -11,7 +11,7 @@
 
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '../../schema';
-import type { Paragraph, TextBox, Shape } from '../../../types/document';
+import type { Paragraph, ParagraphContent, Run, TextBox, Shape } from '../../../types/document';
 import { emuToPixels } from '../../../docx/imageParser';
 import type { StyleResolver } from '../../styles';
 import { isAnchoredDocxTextBox, textBoxAnchorAttrsFromDocx } from '../textBoxAnchors';
@@ -64,31 +64,72 @@ function partitionTextBoxesByAnchor(textBoxes: TextBox[]): {
 }
 
 /**
+ * Collect a paragraph's {@link Run}s in document order, descending through the
+ * same inline wrappers the parser does (`collectRunsThroughInlineWrappers` in
+ * `blockContentParser.ts`). A text box can be anchored from a run nested inside
+ * a content control, hyperlink, field, or tracked-change wrapper; if we only
+ * looked at top-level runs (the prior behavior), the editor save path would
+ * silently drop that text box. Mirror the wrapper set so the editor recovers
+ * exactly what headless does.
+ *
+ * Wrappers expose their nested content under different keys: hyperlink uses
+ * `children`, complexField uses `fieldResult`, everything else (inlineSdt,
+ * simpleField, ins/del/moveFrom/moveTo) uses `content`. (`smartTag` and inline
+ * `customXml` carry no model node — the parser flattens / skips them — so there
+ * is nothing to recurse into for those.)
+ */
+function collectRunsThroughInlineWrappers(content: readonly ParagraphContent[]): Run[] {
+  const runs: Run[] = [];
+  for (const item of content) {
+    if (item.type === 'run') {
+      runs.push(item);
+      continue;
+    }
+    const nested =
+      (
+        item as {
+          content?: ParagraphContent[];
+          children?: ParagraphContent[];
+          fieldResult?: ParagraphContent[];
+        }
+      ).content ??
+      (item as { children?: ParagraphContent[] }).children ??
+      (item as { fieldResult?: ParagraphContent[] }).fieldResult;
+    if (Array.isArray(nested)) {
+      runs.push(...collectRunsThroughInlineWrappers(nested));
+    }
+  }
+  return runs;
+}
+
+/**
  * Extract text boxes from paragraph runs.
  * Text boxes appear as ShapeContent where the shape has textBody,
  * or as DrawingContent that contains a text box instead of an image.
+ *
+ * Runs are collected through inline wrappers (content controls, hyperlinks,
+ * fields, tracked-change wrappers) so a text box anchored from a nested run is
+ * recovered, not just a top-level one.
  */
 function extractTextBoxesFromParagraph(paragraph: Paragraph): TextBox[] {
   const textBoxes: TextBox[] = [];
-  for (const content of paragraph.content) {
-    if (content.type === 'run') {
-      for (const rc of content.content) {
-        if (rc.type === 'shape' && 'shape' in rc) {
-          const shape = rc.shape as Shape;
-          if (shape.textBody && shape.textBody.content.length > 0) {
-            // Convert shape with text body to TextBox
-            textBoxes.push({
-              type: 'textBox',
-              id: shape.id,
-              size: shape.size,
-              position: shape.position,
-              wrap: shape.wrap,
-              fill: shape.fill,
-              outline: shape.outline,
-              content: shape.textBody.content,
-              margins: shape.textBody.margins,
-            });
-          }
+  for (const run of collectRunsThroughInlineWrappers(paragraph.content)) {
+    for (const rc of run.content) {
+      if (rc.type === 'shape' && 'shape' in rc) {
+        const shape = rc.shape as Shape;
+        if (shape.textBody && shape.textBody.content.length > 0) {
+          // Convert shape with text body to TextBox
+          textBoxes.push({
+            type: 'textBox',
+            id: shape.id,
+            size: shape.size,
+            position: shape.position,
+            wrap: shape.wrap,
+            fill: shape.fill,
+            outline: shape.outline,
+            content: shape.textBody.content,
+            margins: shape.textBody.margins,
+          });
         }
       }
     }

@@ -64,6 +64,13 @@ export function fromProseDoc(pmDoc: PMNode, baseDocument?: Document): Document {
       }
     : { package: { document: documentBody, numbering: collectNumberingFromPM(pmDoc) } };
 
+  // Rebalance bookmark markers so every id has matching start/end counts. The
+  // PM `bookmarks` attr fabricates a balanced inline pair for each inline start,
+  // and "lone" inline ends + block markers are carried separately; a straddling
+  // bookmark can leave an id with more ends than starts (or vice versa). This
+  // pass trims the excess so no orphan marker reaches the serializer.
+  rebalanceBookmarkMarkers(result);
+
   // Sync the watermark doc attr → `HeaderFooter.watermark` so the serializer
   // and any model consumers see watermark applies/removes (incl. via undo).
   // Reference comparison skips the header-map clone on the common no-change
@@ -74,6 +81,143 @@ export function fromProseDoc(pmDoc: PMNode, baseDocument?: Document): Document {
     return setDocumentWatermark(result, attrWatermark);
   }
   return result;
+}
+
+/**
+ * A block (paragraph / table / block-SDT) that may carry block-level bookmark
+ * markers riding alongside it for round-trip. See {@link wrapBlockMarkers}.
+ */
+type BlockWithMarkers = {
+  leadingBlockMarkers?: Paragraph['leadingBlockMarkers'];
+  trailingBlockMarkers?: Paragraph['trailingBlockMarkers'];
+};
+
+/**
+ * Make every bookmark id balanced (`bookmarkStart` count == `bookmarkEnd`
+ * count) document-wide by trimming surplus ends. Three sources can each emit an
+ * end for the same id:
+ *   1. the `bookmarks` attr fabrication (a balanced inline pair per inline start),
+ *   2. a carried "lone" inline end (`loneBookmarkEndIds` — a cross-paragraph or
+ *      block-anchored close), and
+ *   3. a carried block-level end marker (`leadingBlockMarkers`/`trailingBlockMarkers`).
+ *
+ * A straddling bookmark therefore over- or under-emits:
+ *   • inline start + block end  → fabricated end + block end = 2 ends (trim 1);
+ *   • inline start in para A + inline end in para B → fabricated end + carried
+ *     lone end = 2 ends (trim 1);
+ *   • block start + inline end → block start + carried lone end = balanced (keep).
+ *
+ * Genuinely block-level bookmarks (block start + block end, the FIX-B case) stay
+ * balanced and are never touched. We only ever REMOVE surplus ends, so a real
+ * start is never orphaned. Trim order prefers block-marker ends, then inline
+ * content ends, so the most redundant carrier goes first.
+ */
+function rebalanceBookmarkMarkers(doc: Document): void {
+  const startCount = new Map<number, number>();
+  const endCount = new Map<number, number>();
+  const bump = (m: Map<number, number>, id: number): void => {
+    m.set(id, (m.get(id) ?? 0) + 1);
+  };
+
+  const countBlock = (block: BlockContent): void => {
+    const withMarkers = block as BlockWithMarkers;
+    for (const marker of withMarkers.leadingBlockMarkers ?? []) {
+      bump(marker.type === 'bookmarkStart' ? startCount : endCount, marker.id);
+    }
+    for (const marker of withMarkers.trailingBlockMarkers ?? []) {
+      bump(marker.type === 'bookmarkStart' ? startCount : endCount, marker.id);
+    }
+    if (block.type === 'paragraph') {
+      for (const item of block.content) {
+        if (item.type === 'bookmarkStart') bump(startCount, item.id);
+        else if (item.type === 'bookmarkEnd') bump(endCount, item.id);
+      }
+    }
+  };
+
+  const walkBlocks = (
+    blocks: BlockContent[] | undefined,
+    visit: (b: BlockContent) => void
+  ): void => {
+    if (!blocks) return;
+    for (const block of blocks) {
+      visit(block);
+      if (block.type === 'table') {
+        for (const row of block.rows) {
+          for (const cell of row.cells) walkBlocks(cell.content as BlockContent[], visit);
+        }
+      } else if (block.type === 'blockSdt') {
+        walkBlocks(block.content, visit);
+      }
+    }
+  };
+  const walkAll = (visit: (b: BlockContent) => void): void => {
+    walkBlocks(doc.package.document.content, visit);
+    for (const section of doc.package.document.sections ?? []) walkBlocks(section.content, visit);
+    for (const hf of doc.package.headers?.values() ?? []) walkBlocks(hf.content, visit);
+    for (const hf of doc.package.footers?.values() ?? []) walkBlocks(hf.content, visit);
+  };
+
+  // Pass 1 — tally starts and ends per id across the whole document.
+  walkAll(countBlock);
+
+  // Per-id budget of ends we must drop (ends beyond the matching start count).
+  const surplus = new Map<number, number>();
+  for (const [id, ends] of endCount) {
+    const extra = ends - (startCount.get(id) ?? 0);
+    if (extra > 0) surplus.set(id, extra);
+  }
+  if (surplus.size === 0) return;
+
+  // Pass 2a — drop surplus block-marker ends first (the most redundant carrier).
+  const filterMarkers = (
+    markers: BlockWithMarkers['leadingBlockMarkers']
+  ): BlockWithMarkers['leadingBlockMarkers'] | undefined => {
+    if (!markers || markers.length === 0) return markers;
+    const kept: NonNullable<BlockWithMarkers['leadingBlockMarkers']> = [];
+    let changed = false;
+    for (const marker of markers) {
+      const budget = marker.type === 'bookmarkEnd' ? (surplus.get(marker.id) ?? 0) : 0;
+      if (budget > 0) {
+        surplus.set(marker.id, budget - 1);
+        changed = true;
+        continue;
+      }
+      kept.push(marker);
+    }
+    return changed ? kept : markers;
+  };
+  walkAll((block) => {
+    const withMarkers = block as BlockWithMarkers;
+    const leading = filterMarkers(withMarkers.leadingBlockMarkers);
+    if (leading && leading.length > 0) withMarkers.leadingBlockMarkers = leading;
+    else delete withMarkers.leadingBlockMarkers;
+    const trailing = filterMarkers(withMarkers.trailingBlockMarkers);
+    if (trailing && trailing.length > 0) withMarkers.trailingBlockMarkers = trailing;
+    else delete withMarkers.trailingBlockMarkers;
+  });
+
+  // Pass 2b — drop any still-surplus inline content ends (relocated duplicates).
+  let remaining = 0;
+  for (const n of surplus.values()) remaining += n;
+  if (remaining === 0) return;
+  walkAll((block) => {
+    if (block.type !== 'paragraph') return;
+    let changed = false;
+    const kept: typeof block.content = [];
+    for (const item of block.content) {
+      if (item.type === 'bookmarkEnd') {
+        const budget = surplus.get(item.id) ?? 0;
+        if (budget > 0) {
+          surplus.set(item.id, budget - 1);
+          changed = true;
+          continue;
+        }
+      }
+      kept.push(item);
+    }
+    if (changed) block.content = kept;
+  });
 }
 
 /**
@@ -134,11 +278,20 @@ function extractBlocks(pmDoc: PMNode): BlockContent[] {
  * rides along for lossless serialization) and recurse into the children.
  */
 function convertPMBlockSdt(node: PMNode): BlockSdt {
-  return {
+  const attrs = node.attrs as Record<string, unknown>;
+  const blockSdt: BlockSdt = {
     type: 'blockSdt',
-    properties: sdtAttrsToProps(node.attrs as Record<string, unknown>),
+    properties: sdtAttrsToProps(attrs),
     content: extractBlocks(node),
   };
+  // Round-trip block-level bookmark markers carried as opaque attrs. The
+  // serializer re-emits them around this control's `w:sdt` via
+  // `wrapBlockMarkers`.
+  const leading = attrs.leadingBlockMarkers as BlockSdt['leadingBlockMarkers'];
+  const trailing = attrs.trailingBlockMarkers as BlockSdt['trailingBlockMarkers'];
+  if (leading && leading.length > 0) blockSdt.leadingBlockMarkers = leading;
+  if (trailing && trailing.length > 0) blockSdt.trailingBlockMarkers = trailing;
+  return blockSdt;
 }
 
 /**

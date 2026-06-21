@@ -32,6 +32,11 @@ export const tableSpec: NodeSpec = {
     look: { default: null },
     bidi: { default: null },
     _originalFormatting: { default: null },
+    // Block-level bookmark markers that wrap this table's `w:tbl` in the
+    // parent container. Opaque anchors — not rendered. Carried so block
+    // bookmarks survive the toProseDoc → fromProseDoc round trip.
+    leadingBlockMarkers: { default: null },
+    trailingBlockMarkers: { default: null },
     // Table-property change history (`<w:tblPrChange>`). Round-trip only;
     // accept/reject by id resolves the entry. Serializer clamps to one entry.
     tblPrChange: { default: null },

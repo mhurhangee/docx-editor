@@ -62,6 +62,17 @@ export function convertPMParagraph(node: PMNode): Paragraph {
     content = [...starts, ...content, ...ends];
   }
 
+  // Re-emit "lone" inline bookmarkEnds — those whose start lives elsewhere (a
+  // block-level start, or an inline start in an earlier paragraph). Appended
+  // after the content so the close sits past the paragraph's runs. The global
+  // `stripInlineDuplicatedBlockMarkers` rebalance trims any that a fabricated
+  // pair already covers (a relocated cross-paragraph end).
+  if (attrs.loneBookmarkEndIds && attrs.loneBookmarkEndIds.length > 0) {
+    const loneEnds: import('../../../types/content').ParagraphContent[] =
+      attrs.loneBookmarkEndIds.map((id) => ({ type: 'bookmarkEnd' as const, id }));
+    content = [...content, ...loneEnds];
+  }
+
   const paragraph: Paragraph = {
     type: 'paragraph',
     paraId: attrs.paraId || undefined,
@@ -104,6 +115,16 @@ export function convertPMParagraph(node: PMNode): Paragraph {
     paragraph.sectionProperties = {
       sectionStart: attrs.sectionBreakType as import('../../../types/content').SectionStart,
     };
+  }
+
+  // Round-trip block-level bookmark markers carried as opaque attrs. The
+  // serializer re-emits them around this paragraph's `w:p` via
+  // `wrapBlockMarkers`. Kept separate from the inline `bookmarks` attr.
+  if (attrs.leadingBlockMarkers && attrs.leadingBlockMarkers.length > 0) {
+    paragraph.leadingBlockMarkers = attrs.leadingBlockMarkers;
+  }
+  if (attrs.trailingBlockMarkers && attrs.trailingBlockMarkers.length > 0) {
+    paragraph.trailingBlockMarkers = attrs.trailingBlockMarkers;
   }
 
   return paragraph;

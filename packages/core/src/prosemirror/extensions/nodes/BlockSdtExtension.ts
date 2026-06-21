@@ -55,6 +55,14 @@ export const BlockSdtExtension = createNodeExtension({
       rawPropertiesXml: { default: null },
       /** Captured `<w:sdtEndPr>` XML (verbatim), if present. */
       rawEndPropertiesXml: { default: null },
+      /**
+       * Block-level bookmark markers that wrap this control's `w:sdt` in the
+       * parent container (`BlockSdt.leadingBlockMarkers` / `trailingBlockMarkers`).
+       * Opaque anchors — not rendered; carried so block bookmarks adjacent to a
+       * content control survive the toProseDoc → fromProseDoc round trip.
+       */
+      leadingBlockMarkers: { default: null },
+      trailingBlockMarkers: { default: null },
     },
     parseDOM: [
       {

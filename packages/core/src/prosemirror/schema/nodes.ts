@@ -23,7 +23,19 @@ import type {
 } from '../../types/document';
 import type { RevisionInfo } from '../../types/content/trackedChange';
 import type { FloatingTableProperties, TableLook } from '../../types';
+import type { BookmarkStart, BookmarkEnd } from '../../types/content/link';
 import type { WrapType } from '../../docx/wrapTypes';
+
+/**
+ * Block-level bookmark markers (`w:bookmarkStart`/`w:bookmarkEnd`) that sit
+ * between block siblings in the parent container. The block content model
+ * carries only paragraphs/tables/SDTs, so these markers ride as opaque attrs
+ * on the adjacent block to survive the toProseDoc → fromProseDoc round trip
+ * (the serializer re-emits them via `wrapBlockMarkers`). They are invisible
+ * anchors — no `toDOM`/`parseDOM` rendering. Distinct from the inline
+ * `bookmarks` attr, which carries bookmarks that wrap a paragraph's runs.
+ */
+export type BlockBookmarkMarkers = (BookmarkStart | BookmarkEnd)[];
 
 /**
  * Paragraph node attributes - maps to ParagraphFormatting
@@ -139,6 +151,30 @@ export interface ParagraphAttrs {
 
   // Bookmarks on this paragraph (for TOC anchors, cross-references)
   bookmarks?: Array<{ id: number; name: string }>;
+
+  /**
+   * Inline `bookmarkEnd` ids whose matching `bookmarkStart` is NOT inline in the
+   * same paragraph — i.e. a bookmark that opens elsewhere (a block-level start,
+   * or an inline start in an earlier paragraph) and closes here. The `bookmarks`
+   * attr only fabricates a balanced start+end pair for inline starts, so without
+   * carrying these "lone" ends they would be dropped, orphaning a block-level or
+   * cross-paragraph start. fromProseDoc re-emits them; the global
+   * `stripInlineDuplicatedBlockMarkers` rebalance trims any that the fabricated
+   * pair already covers (a relocated end). See {@link bookmarks}.
+   */
+  loneBookmarkEndIds?: number[];
+
+  /**
+   * Block-level bookmark markers sitting BEFORE this paragraph's `w:p` in the
+   * parent block container. Carried verbatim from / to the model's
+   * `Paragraph.leadingBlockMarkers`. See {@link BlockBookmarkMarkers}.
+   */
+  leadingBlockMarkers?: BlockBookmarkMarkers;
+  /**
+   * Block-level bookmark markers sitting AFTER this paragraph's `w:p`. Mirrors
+   * the model's `Paragraph.trailingBlockMarkers`. See {@link BlockBookmarkMarkers}.
+   */
+  trailingBlockMarkers?: BlockBookmarkMarkers;
 
   /** Original inline paragraph formatting from DOCX (pre-style-resolution).
    *  Used by fromProseDoc for lossless round-trip serialization. */
@@ -299,6 +335,17 @@ export interface TableAttrs {
   bidi?: boolean;
   /** Original table formatting from DOCX for lossless round-trip serialization */
   _originalFormatting?: TableFormatting;
+  /**
+   * Block-level bookmark markers sitting BEFORE this table's `w:tbl` in the
+   * parent block container. Mirrors the model's `Table.leadingBlockMarkers`.
+   * See {@link BlockBookmarkMarkers}.
+   */
+  leadingBlockMarkers?: BlockBookmarkMarkers;
+  /**
+   * Block-level bookmark markers sitting AFTER this table's `w:tbl`. Mirrors
+   * the model's `Table.trailingBlockMarkers`. See {@link BlockBookmarkMarkers}.
+   */
+  trailingBlockMarkers?: BlockBookmarkMarkers;
   /**
    * Table-property change history (`<w:tblPrChange>`). Same shape as the
    * model `Table.propertyChanges`. OOXML allows at most one entry per table

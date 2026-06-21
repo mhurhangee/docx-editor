@@ -303,6 +303,16 @@ const paragraphNodeSpec: NodeSpec = {
     bidi: { default: null },
     outlineLevel: { default: null },
     bookmarks: { default: null },
+    // Inline `bookmarkEnd`s whose start is not inline in this paragraph (a block
+    // start or a cross-paragraph inline start closes here). Carried so the end
+    // survives the round trip; the global rebalance trims any covered by a
+    // fabricated pair. See ParagraphAttrs.loneBookmarkEndIds.
+    loneBookmarkEndIds: { default: null },
+    // Block-level bookmark markers that wrap this paragraph's `w:p` in the
+    // parent container. Opaque anchors — not rendered. Carried so block
+    // bookmarks survive the toProseDoc → fromProseDoc round trip.
+    leadingBlockMarkers: { default: null },
+    trailingBlockMarkers: { default: null },
     _originalFormatting: { default: null },
     _originalRunBoundaries: { default: null },
     _sectionProperties: { default: null },

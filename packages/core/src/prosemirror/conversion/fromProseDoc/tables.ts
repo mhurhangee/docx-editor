@@ -176,6 +176,20 @@ function normalizeVMergeRuns(rows: TableRow[]): void {
   }
 }
 
+/**
+ * Restore block-level bookmark markers carried as opaque PM attrs back onto
+ * the rebuilt table. The serializer re-emits them around the `w:tbl` via
+ * `wrapBlockMarkers`. Both `convertPMTable` return paths funnel through here.
+ */
+function applyBlockMarkers(table: Table, attrs: TableAttrs): void {
+  if (attrs.leadingBlockMarkers && attrs.leadingBlockMarkers.length > 0) {
+    table.leadingBlockMarkers = attrs.leadingBlockMarkers;
+  }
+  if (attrs.trailingBlockMarkers && attrs.trailingBlockMarkers.length > 0) {
+    table.trailingBlockMarkers = attrs.trailingBlockMarkers;
+  }
+}
+
 export function convertPMTable(node: PMNode): Table {
   const attrs = node.attrs as TableAttrs;
   const { anchors, totalCols } = collectPMTableAnchors(node);
@@ -292,12 +306,14 @@ export function convertPMTable(node: PMNode): Table {
       } else {
         // No other formatting — create a minimal formatting object with borders
         // so borders persist on round-trip.
-        return {
+        const minimal: Table = {
           type: 'table',
           columnWidths: attrs.columnWidths || undefined,
           formatting: { borders: inferredBorders },
           rows,
         };
+        applyBlockMarkers(minimal, attrs);
+        return minimal;
       }
     }
   }
@@ -311,6 +327,7 @@ export function convertPMTable(node: PMNode): Table {
   if (attrs.tblPrChange && attrs.tblPrChange.length > 0) {
     result.propertyChanges = attrs.tblPrChange;
   }
+  applyBlockMarkers(result, attrs);
   return result;
 }
 

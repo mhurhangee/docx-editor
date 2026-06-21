@@ -62,7 +62,17 @@ function convertBlocksToNodes(
         includePageBreaks
       );
       const inner = childNodes.length > 0 ? childNodes : [schema.node('paragraph', {}, [])];
-      nodes.push(schema.node('blockSdt', sdtPropsToAttrs(block.properties), inner));
+      // Block-level bookmark markers wrapping this control's `w:sdt` ride as
+      // opaque attrs alongside the projected SDT properties (serializer
+      // re-emits them via `wrapBlockMarkers`).
+      const sdtAttrs: Record<string, unknown> = sdtPropsToAttrs(block.properties);
+      if (block.leadingBlockMarkers && block.leadingBlockMarkers.length > 0) {
+        sdtAttrs.leadingBlockMarkers = block.leadingBlockMarkers;
+      }
+      if (block.trailingBlockMarkers && block.trailingBlockMarkers.length > 0) {
+        sdtAttrs.trailingBlockMarkers = block.trailingBlockMarkers;
+      }
+      nodes.push(schema.node('blockSdt', sdtAttrs, inner));
     }
   }
   return nodes;

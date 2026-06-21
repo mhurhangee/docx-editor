@@ -265,10 +265,11 @@ function enrichParagraphTextBoxes(
  * enrichment and its text is silently dropped at parse.
  *
  * This mirrors the inline-wrapper set the paragraph parser descends through
- * (`paragraphStartsWithRenderedPageBreak` in `paragraphParser/content.ts`); a
- * wrapper missing here re-introduces the same drop bug for a box anchored inside
- * it, so keep the two aligned. (`w:sdtContent` is reached via the dedicated
- * `w:sdt` branch in `collectRunsThroughInlineWrappers`, not this set.)
+ * (`paragraphStartsWithRenderedPageBreak` in `paragraphParser/content.ts` —
+ * sdt, hyperlink, smartTag, fldSimple, customXml, ins, del, moveFrom, moveTo);
+ * a wrapper missing here re-introduces the same drop bug for a box anchored
+ * inside it, so keep the two aligned. (`w:sdtContent` is reached via the
+ * dedicated `w:sdt` branch in `collectRunsThroughInlineWrappers`, not this set.)
  */
 const INLINE_RUN_WRAPPERS = new Set([
   'sdt',
@@ -278,6 +279,15 @@ const INLINE_RUN_WRAPPERS = new Set([
   'moveFrom',
   'moveTo',
   'smartTag',
+  // Honor the canonical wrapper set (`paragraphStartsWithRenderedPageBreak`).
+  // `fldSimple` (e.g. a PAGE field) really can host an anchored text box, so a
+  // box nested there must be reached. `customXml` is included to keep the two
+  // sets aligned, but the paragraph parser currently SKIPS inline `w:customXml`
+  // content (see `case 'customXml'` in `paragraphParser/content.ts`), so its
+  // runs never reach the model — descending here is inert for `customXml` until
+  // that parser case preserves content.
+  'fldSimple',
+  'customXml',
 ]);
 
 /**

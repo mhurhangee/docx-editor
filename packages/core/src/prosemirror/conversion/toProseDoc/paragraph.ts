@@ -46,6 +46,7 @@ export function convertParagraph(
   const attrs = paragraphFormattingToAttrs(paragraph, styleResolver);
   const inlineNodes: PMNode[] = [];
   let bookmarksArr: Array<{ id: number; name: string }> | undefined;
+  let inlineEndIds: number[] | undefined;
   let originalRunBoundaries: ParagraphAttrs['_originalRunBoundaries'] = [];
 
   // Track active comment ranges for this paragraph
@@ -155,14 +156,38 @@ export function convertParagraph(
     if (content.type === 'bookmarkStart') {
       if (!bookmarksArr) bookmarksArr = [];
       bookmarksArr.push({ id: content.id, name: content.name });
+    } else if (content.type === 'bookmarkEnd') {
+      // Track every inline bookmarkEnd; below we keep only the "lone" ones —
+      // those whose matching start is NOT inline in this paragraph. Those would
+      // otherwise be dropped (the `bookmarks` attr only fabricates ends for
+      // inline starts), orphaning a block-level or cross-paragraph start.
+      if (!inlineEndIds) inlineEndIds = [];
+      inlineEndIds.push(content.id);
     }
   }
 
   if (bookmarksArr) {
     attrs.bookmarks = bookmarksArr;
   }
+  if (inlineEndIds) {
+    const startIds = new Set((bookmarksArr ?? []).map((b) => b.id));
+    const loneEndIds = inlineEndIds.filter((id) => !startIds.has(id));
+    if (loneEndIds.length > 0) {
+      attrs.loneBookmarkEndIds = loneEndIds;
+    }
+  }
   if (originalRunBoundaries && originalRunBoundaries.length > 0) {
     attrs._originalRunBoundaries = originalRunBoundaries;
+  }
+  // Carry block-level bookmark markers (the side-channel `wrapBlockMarkers`
+  // emits) verbatim onto the PM node so they survive the edit round trip.
+  // These are SEPARATE from the inline `bookmarks` attr above — they wrap the
+  // whole `w:p`, not its runs — so there is no double emission.
+  if (paragraph.leadingBlockMarkers && paragraph.leadingBlockMarkers.length > 0) {
+    attrs.leadingBlockMarkers = paragraph.leadingBlockMarkers;
+  }
+  if (paragraph.trailingBlockMarkers && paragraph.trailingBlockMarkers.length > 0) {
+    attrs.trailingBlockMarkers = paragraph.trailingBlockMarkers;
   }
 
   return schema.node('paragraph', attrs, inlineNodes);
