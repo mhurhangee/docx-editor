@@ -582,6 +582,9 @@ export function resetBlockIdCounter(): void;
 // @public
 export function resetCanvasContext(): void;
 
+// @public (undocumented)
+export function resetImeCaretAnchor(hiddenHost: HTMLElement | null | undefined): void;
+
 // @internal
 export function resolveCellGrid(tableBlock: TableBlock): ResolvedGridCell[];
 
@@ -691,6 +694,19 @@ export interface StabilizeFootnoteLayoutResult {
 }
 
 // @public
+export function syncImeCaretAnchor(input: SyncImeCaretAnchorOptions): boolean;
+
+// @public (undocumented)
+export interface SyncImeCaretAnchorOptions {
+    // (undocumented)
+    editorView: EditorView | null | undefined;
+    // (undocumented)
+    hiddenHost: HTMLElement | null | undefined;
+    // (undocumented)
+    visibleCaret: VisibleCaretViewportRect | null | undefined;
+}
+
+// @public
 export const TABLE_INSERT_EDGE_PROXIMITY = 30;
 
 // @public (undocumented)
@@ -759,5 +775,13 @@ export function twipsToPixels(twips: number): number;
 
 // @public
 export function twipsToPx(twips: number): number;
+
+// @public (undocumented)
+export interface VisibleCaretViewportRect {
+    // (undocumented)
+    left: number;
+    // (undocumented)
+    top: number;
+}
 
 ```

@@ -77,6 +77,8 @@ export interface HiddenProseMirrorProps {
 }
 
 export interface HiddenProseMirrorRef {
+  /** Get the off-screen host element */
+  getHostElement(): HTMLElement | null;
   /** Get the ProseMirror EditorState */
   getState(): EditorState | null;
   /** Get the ProseMirror EditorView */
@@ -415,6 +417,10 @@ const HiddenProseMirrorComponent = forwardRef<HiddenProseMirrorRef, HiddenProseM
     useImperativeHandle(
       ref,
       () => ({
+        getHostElement() {
+          return hostRef.current;
+        },
+
         getState() {
           return viewRef.current?.state ?? null;
         },
