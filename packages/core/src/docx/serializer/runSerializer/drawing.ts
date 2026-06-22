@@ -293,6 +293,10 @@ export function serializeShapeContent(content: ShapeContent): string {
   const cx = shape.size.width;
   const cy = shape.size.height;
   const isTextBox = shape.shapeType === 'textBox';
+  // Geometry (shapeType) and text presence are orthogonal: a `rect` shape can
+  // still hold a w:txbxContent — and the parser stores ALL parsed text boxes as
+  // `rect`, so gating on geometry drops their text on save. Gate on text.
+  const hasText = !!shape.textBody && shape.textBody.content.length > 0;
   const isFloating = shape.wrap && shape.wrap.type !== 'inline';
   const distT = shape.wrap?.distT ?? 0;
   const distB = shape.wrap?.distB ?? 0;
@@ -336,7 +340,7 @@ export function serializeShapeContent(content: ShapeContent): string {
       if (tb.margins.bottom != null) bpAttrs.push(`bIns="${intAttr(tb.margins.bottom)}"`);
     }
 
-    if (isTextBox) {
+    if (tb.content && tb.content.length > 0) {
       textBody = [
         '<wps:txbx><w:txbxContent>',
         serializeShapeTextBody(tb.content),
@@ -351,7 +355,7 @@ export function serializeShapeContent(content: ShapeContent): string {
   // Build wps:wsp
   const wsp = [
     '<wps:wsp>',
-    `<wps:cNvSpPr${isTextBox ? ' txBox="1"' : ''}/>`,
+    `<wps:cNvSpPr${hasText ? ' txBox="1"' : ''}/>`,
     spPr,
     textBody,
     '</wps:wsp>',

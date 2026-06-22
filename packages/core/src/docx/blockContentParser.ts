@@ -145,7 +145,7 @@ function resolveBulletMarker(paragraph: Paragraph): void {
  * a second pass over the raw XML to find text box drawings, parse them with their content,
  * and inject ShapeContent into the paragraph's runs.
  */
-function enrichParagraphTextBoxes(
+export function enrichParagraphTextBoxes(
   paragraph: Paragraph,
   paraXml: XmlElement,
   styles: StyleMap | null,

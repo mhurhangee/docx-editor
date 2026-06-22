@@ -46,6 +46,10 @@ import type {
 import type { StyleMap } from './styleParser';
 import type { NumberingMap } from './numberingParser';
 import { parseParagraph } from './paragraphParser';
+// Shared with the body/header/footer parser (blockContentParser): a paragraph
+// inside a table cell needs the same anchored-text-box enrichment pass, or a
+// text box anchored from a run in a cell is dropped at parse.
+import { enrichParagraphTextBoxes } from './blockContentParser';
 import {
   findChild,
   findChildren,
@@ -569,6 +573,10 @@ function parseCellContent(
     if (localName === 'p') {
       // Parse paragraph
       const para = parseParagraph(child, styles, theme, numbering, rels, media, options);
+      // Enrich with anchored text boxes, exactly as the body/header/footer
+      // parser does — otherwise a text box anchored from a run inside this cell
+      // is silently dropped at parse.
+      enrichParagraphTextBoxes(para, child, styles, theme, numbering, rels, media);
       content.push(para);
     } else if (localName === 'tbl') {
       // Parse nested table (recursive)
