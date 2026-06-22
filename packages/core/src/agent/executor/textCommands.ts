@@ -19,12 +19,15 @@ import {
   getBlockIndexForParagraph,
   getParagraphText,
   insertTextAtOffset,
+  validatePosition,
+  validateRange,
 } from './helpers';
 
 /**
  * Insert text at a position
  */
 export function executeInsertText(doc: Document, command: InsertTextCommand): Document {
+  validatePosition(command.position);
   const newDoc = cloneDocument(doc);
   const body = newDoc.package.document;
   const blockIndex = getBlockIndexForParagraph(body, command.position.paragraphIndex);
@@ -48,6 +51,7 @@ export function executeInsertText(doc: Document, command: InsertTextCommand): Do
  * Replace text in a range
  */
 export function executeReplaceText(doc: Document, command: ReplaceTextCommand): Document {
+  validateRange(command.range);
   const newDoc = cloneDocument(doc);
   const body = newDoc.package.document;
 
@@ -108,6 +112,7 @@ export function executeReplaceText(doc: Document, command: ReplaceTextCommand): 
  * Delete text in a range
  */
 export function executeDeleteText(doc: Document, command: DeleteTextCommand): Document {
+  validateRange(command.range);
   const newDoc = cloneDocument(doc);
   const body = newDoc.package.document;
 
@@ -158,6 +163,7 @@ export function executeDeleteText(doc: Document, command: DeleteTextCommand): Do
  * Apply formatting to a range
  */
 export function executeFormatText(doc: Document, command: FormatTextCommand): Document {
+  validateRange(command.range);
   const newDoc = cloneDocument(doc);
   const body = newDoc.package.document;
 

@@ -168,9 +168,11 @@ export function renderImageFragment(
     containerEl.dataset.pmEnd = String(fragment.pmEnd);
   }
 
-  // Create the actual image element
+  // Create the actual image element. Constrain the source to known-safe
+  // schemes — image bytes come from the (untrusted) document as data: URLs, so
+  // anything else (e.g. a smuggled javascript:/external scheme) is dropped.
   const imgEl = doc.createElement('img');
-  imgEl.src = block.src;
+  imgEl.src = /^(?:data:|blob:|https?:)/i.test(block.src) ? block.src : '';
   imgEl.alt = block.alt ?? '';
 
   // Image sizing

@@ -27,6 +27,55 @@
 import JSZip from 'jszip';
 
 /**
+ * Decompression limits — guard against zip bombs.
+ *
+ * A DOCX is a ZIP archive; every byte is attacker-controlled. JSZip inflates
+ * each entry on demand with no built-in size limit, so a few-KB file can expand
+ * to multiple GB and freeze/OOM the tab. We cap entry count, per-entry size, and
+ * total uncompressed bytes, bailing as soon as a limit is crossed. Limits are
+ * generous enough for real documents (large embedded media, long XML) while
+ * stopping bombs well before they exhaust memory.
+ */
+export const MAX_ENTRIES = 5000;
+export const MAX_ENTRY_UNCOMPRESSED_BYTES = 150 * 1024 * 1024; // 150 MB
+export const MAX_TOTAL_UNCOMPRESSED_BYTES = 300 * 1024 * 1024; // 300 MB
+
+/**
+ * Throw if reading an entry of `entrySize` bytes would breach the per-entry or
+ * cumulative decompression budget. Pure (no I/O) so it can be called both
+ * before inflating (using the declared size) and after (using the actual size).
+ */
+export function assertDecompressionBudget(
+  path: string,
+  entrySize: number,
+  totalSoFar: number
+): void {
+  if (entrySize > MAX_ENTRY_UNCOMPRESSED_BYTES) {
+    throw new Error(
+      `DOCX rejected: entry "${path}" exceeds size limit ` +
+        `(${entrySize} > ${MAX_ENTRY_UNCOMPRESSED_BYTES} bytes)`
+    );
+  }
+  if (totalSoFar + entrySize > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+    throw new Error(
+      `DOCX rejected: total uncompressed size exceeds limit ` +
+        `(> ${MAX_TOTAL_UNCOMPRESSED_BYTES} bytes)`
+    );
+  }
+}
+
+/**
+ * JSZip records the declared uncompressed size on each entry before it is
+ * inflated. Reading it lets us reject a giant entry without ever decompressing
+ * it. The field is internal/undocumented, so we access it defensively.
+ */
+function declaredUncompressedSize(file: JSZip.JSZipObject): number | undefined {
+  const data = (file as unknown as { _data?: { uncompressedSize?: unknown } })._data;
+  const size = data?.uncompressedSize;
+  return typeof size === 'number' && Number.isFinite(size) ? size : undefined;
+}
+
+/**
  * Raw extracted content from a DOCX file
  */
 export interface RawDocxContent {
@@ -91,6 +140,35 @@ export interface RawDocxContent {
 export async function unzipDocx(buffer: ArrayBuffer): Promise<RawDocxContent> {
   const zip = await JSZip.loadAsync(buffer);
 
+  const fileCount = Object.values(zip.files).filter((f) => !f.dir).length;
+  if (fileCount > MAX_ENTRIES) {
+    throw new Error(`DOCX rejected: archive has too many entries (${fileCount} > ${MAX_ENTRIES})`);
+  }
+
+  // Running total of bytes we have inflated, enforced against the budget below.
+  let totalUncompressed = 0;
+
+  // Read an entry as text/binary while enforcing decompression limits. The
+  // declared size (when available) lets us reject a bomb before inflating it;
+  // the post-inflation accumulation is the fallback when it is not.
+  const readEntry = async <T extends 'text' | 'arraybuffer'>(
+    path: string,
+    file: JSZip.JSZipObject,
+    kind: T
+  ): Promise<T extends 'text' ? string : ArrayBuffer> => {
+    const declared = declaredUncompressedSize(file);
+    if (declared !== undefined) assertDecompressionBudget(path, declared, totalUncompressed);
+
+    const data = kind === 'text' ? await file.async('text') : await file.async('arraybuffer');
+    const size = typeof data === 'string' ? data.length : (data as ArrayBuffer).byteLength;
+
+    // Re-check against the actual size in case the declared size was absent or lied.
+    assertDecompressionBudget(path, size, totalUncompressed);
+    totalUncompressed += size;
+
+    return data as T extends 'text' ? string : ArrayBuffer;
+  };
+
   const content: RawDocxContent = {
     documentXml: null,
     stylesXml: null,
@@ -128,7 +206,7 @@ export async function unzipDocx(buffer: ArrayBuffer): Promise<RawDocxContent> {
 
     // Determine file type and extract
     if (lowerPath.endsWith('.xml') || lowerPath.endsWith('.rels')) {
-      const xmlContent = await file.async('text');
+      const xmlContent = await readEntry(path, file, 'text');
       content.allXml.set(path, xmlContent);
 
       // Categorize known XML files
@@ -177,11 +255,11 @@ export async function unzipDocx(buffer: ArrayBuffer): Promise<RawDocxContent> {
       }
     } else if (lowerPath.startsWith('word/media/')) {
       // Media files (images, etc.)
-      const binaryContent = await file.async('arraybuffer');
+      const binaryContent = await readEntry(path, file, 'arraybuffer');
       content.media.set(path, binaryContent);
     } else if (lowerPath.startsWith('word/fonts/')) {
       // Embedded fonts
-      const binaryContent = await file.async('arraybuffer');
+      const binaryContent = await readEntry(path, file, 'arraybuffer');
       content.fonts.set(path, binaryContent);
     }
   }

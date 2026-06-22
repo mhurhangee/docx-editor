@@ -26,6 +26,24 @@ import {
 // ============================================================================
 
 /**
+ * Validate and normalize an RGB hex value read from a document.
+ *
+ * OOXML colors (a:srgbClr@val, a:sysClr@lastClr, etc.) are attacker-controlled
+ * — every byte of a .docx is untrusted. Downstream, these values are
+ * interpolated into CSS (`#${rgb}`) and SVG, so an unvalidated value can break
+ * out of an attribute or tag and inject markup. Constrain to a bare hex string
+ * (3/6/8 digits, no `#`), uppercased for consistency. Returns undefined for
+ * anything else so the color is simply dropped rather than rendered.
+ */
+export function sanitizeRgbHex(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const hex = value.startsWith('#') ? value.slice(1) : value;
+  return /^[0-9A-Fa-f]{3}$|^[0-9A-Fa-f]{6}$|^[0-9A-Fa-f]{8}$/.test(hex)
+    ? hex.toUpperCase()
+    : undefined;
+}
+
+/**
  * Map OOXML scheme names to standard theme color slots.
  * Used when parsing a:schemeClr elements in DrawingML.
  */
@@ -107,7 +125,7 @@ export function parseColorElement(element: XmlElement | null): ColorValue | unde
   // sRGB color: a:srgbClr[@val]
   const srgbClr = children.find((el) => el.name === 'a:srgbClr');
   if (srgbClr) {
-    const val = getAttribute(srgbClr, null, 'val');
+    const val = sanitizeRgbHex(getAttribute(srgbClr, null, 'val'));
     if (val) {
       return applyColorModifiers({ rgb: val }, srgbClr);
     }
@@ -128,7 +146,7 @@ export function parseColorElement(element: XmlElement | null): ColorValue | unde
   // System color: a:sysClr[@lastClr]
   const sysClr = children.find((el) => el.name === 'a:sysClr');
   if (sysClr) {
-    const lastClr = getAttribute(sysClr, null, 'lastClr');
+    const lastClr = sanitizeRgbHex(getAttribute(sysClr, null, 'lastClr'));
     return { rgb: lastClr ?? '000000' };
   }
 
@@ -416,7 +434,12 @@ const DEFAULT_THEME_COLOR_HEX: Record<string, string> = {
 export function resolveColorValueToHex(color: ColorValue | undefined): string | undefined {
   if (!color) return undefined;
 
-  if (color.rgb) return `#${color.rgb}`;
+  if (color.rgb) {
+    // Defensive: never emit an unvalidated rgb into CSS. Values are sanitized at
+    // the parse boundary, but ColorValue.rgb can also be set elsewhere.
+    const safe = sanitizeRgbHex(color.rgb);
+    if (safe) return `#${safe}`;
+  }
 
   if (color.themeColor) {
     return `#${DEFAULT_THEME_COLOR_HEX[color.themeColor] ?? '000000'}`;

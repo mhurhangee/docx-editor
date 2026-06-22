@@ -36,7 +36,12 @@ export function parseStyleAttr(style: string | null): Record<string, string> {
     if (idx < 0) continue;
     const key = decl.slice(0, idx).trim().toLowerCase();
     const value = decl.slice(idx + 1).trim();
-    if (key) out[key] = value;
+    // Skip keys that would pollute the prototype — the style string is
+    // attacker-controlled and `out` is a plain object.
+    if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
+    out[key] = value;
   }
   return out;
 }

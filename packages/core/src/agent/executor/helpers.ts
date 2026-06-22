@@ -22,6 +22,43 @@ export function cloneDocument(doc: Document): Document {
   return JSON.parse(JSON.stringify(doc));
 }
 
+/** A paragraph-relative position used by text-editing commands. */
+export interface EditorPosition {
+  paragraphIndex: number;
+  offset: number;
+}
+
+/**
+ * Validate a caller-supplied position. Paragraph indices and character offsets
+ * arrive from the agent/MCP API, so reject non-integer, negative, or non-finite
+ * values before they silently corrupt the in-memory document (e.g. a negative
+ * offset that inserts at the wrong place).
+ */
+export function validatePosition(position: EditorPosition): void {
+  if (!Number.isInteger(position.paragraphIndex) || position.paragraphIndex < 0) {
+    throw new Error(`Invalid paragraphIndex: ${position.paragraphIndex}`);
+  }
+  if (!Number.isInteger(position.offset) || position.offset < 0) {
+    throw new Error(`Invalid offset: ${position.offset}`);
+  }
+}
+
+/**
+ * Validate a caller-supplied range: both endpoints must be valid positions and
+ * the end must not precede the start.
+ */
+export function validateRange(range: { start: EditorPosition; end: EditorPosition }): void {
+  validatePosition(range.start);
+  validatePosition(range.end);
+  const inverted =
+    range.end.paragraphIndex < range.start.paragraphIndex ||
+    (range.end.paragraphIndex === range.start.paragraphIndex &&
+      range.end.offset < range.start.offset);
+  if (inverted) {
+    throw new Error('Invalid range: end precedes start');
+  }
+}
+
 /**
  * Get the block index for a paragraph index
  */

@@ -329,10 +329,23 @@ export async function startStdioServer(config: McpServerConfig = {}): Promise<vo
     terminal: false,
   });
 
+  // Hard cap on the in-memory frame buffer. Prevents a malformed peer from
+  // exhausting memory by streaming bytes that never parse into a complete
+  // JSON-RPC request. 1 MiB is far larger than any legitimate request.
+  const MAX_BUFFER_BYTES = 1024 * 1024;
+
   let buffer = '';
 
   rl.on('line', async (line) => {
     buffer += line;
+
+    if (buffer.length > MAX_BUFFER_BYTES) {
+      if (config.debug) {
+        console.error('[MCP] Input buffer exceeded limit; discarding');
+      }
+      buffer = '';
+      return;
+    }
 
     // Try to parse complete JSON
     try {
