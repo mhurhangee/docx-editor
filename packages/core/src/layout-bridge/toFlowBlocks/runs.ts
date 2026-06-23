@@ -221,14 +221,16 @@ function extractRunFormatting(marks: readonly Mark[], theme?: Theme | null): Run
         } else {
           formatting.footnoteRefId = id;
         }
-        // A footnote/endnote reference anchor renders superscript by default:
-        // Word's built-in FootnoteReference / EndnoteReference character style
-        // sets w:vertAlign="superscript". The OOXML often omits an explicit
-        // rStyle on the anchor run (e.g. Pandoc-generated documents author a
-        // bare `<w:r><w:footnoteReference/></w:r>`), so apply the superscript
-        // implicitly here to match Word / LibreOffice rather than depending on
-        // the rStyle being present.
-        formatting.superscript = true;
+        // Superscript is NOT implied by the anchor. In Word the raised
+        // appearance comes entirely from the FootnoteReference / EndnoteReference
+        // character style (w:vertAlign="superscript"); a bare anchor run with no
+        // rStyle (e.g. Pandoc's `<w:r><w:footnoteReference/></w:r>`) renders at
+        // the baseline. We honor that: the `superscript` mark — set from the
+        // run's own vertAlign or resolved from the rStyle's style chain — is the
+        // single source of truth, so docx-editor matches Word rather than
+        // "correcting" an unstyled anchor (which diverged from Word; LibreOffice
+        // auto-raises, Word does not). Build pipelines that emit bare anchors
+        // must apply the character style at the source.
         break;
       }
 
