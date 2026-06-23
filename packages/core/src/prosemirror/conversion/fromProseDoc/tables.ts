@@ -515,10 +515,8 @@ function convertPMTableCell(node: PMNode): TableCell {
   const attrs = node.attrs as TableCellAttrs;
   const content: (Paragraph | Table)[] = [];
 
-  // Anchored text boxes inside the cell ride as sibling `textBox` nodes (see
-  // toProseDoc convertTableCell). Re-attach an anchored box into the following
-  // cell paragraph's runs, mirroring the body's extractBlocks re-anchoring, so
-  // an in-editor save keeps it instead of dropping it.
+  // Re-attach an anchored cell text box (sibling `textBox` node) into the
+  // following paragraph's runs, mirroring the body's extractBlocks.
   let pendingAnchoredTextBoxRuns: Run[] = [];
   const flushPendingTextBoxes = (): void => {
     for (const run of pendingAnchoredTextBoxRuns) {

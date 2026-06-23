@@ -759,10 +759,8 @@ function convertTableCell(
   const contentNodes: PMNode[] = [];
   for (const content of cell.content) {
     if (content.type === 'paragraph') {
-      // Promote the paragraph's anchored text boxes to sibling `textBox` nodes
-      // inside the cell — exactly as the body parser does — so a box anchored
-      // from a run in this cell renders in the editor and survives an in-editor
-      // save, instead of staying buried in the run and being dropped.
+      // Promote anchored text boxes to sibling `textBox` nodes (as the body
+      // does) so a cell box renders and survives save.
       contentNodes.push(
         ...convertParagraphWithTextBoxes(content, styleResolver, conditionalStyle?.rPr)
       );

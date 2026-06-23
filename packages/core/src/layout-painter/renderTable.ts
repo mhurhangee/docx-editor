@@ -208,8 +208,8 @@ function renderCellContent(
       cumulativeY += effectiveSpaceBefore + ((measure as TableMeasure).totalHeight ?? 0);
       previousParagraphAfter = 0;
     } else if (block?.kind === 'textBox' && measure?.kind === 'textBox') {
-      // A text box anchored inside the cell, rendered IN-FLOW (Option A): it
-      // takes vertical space in the cell rather than floating at page level.
+      // Anchored cell text box: rendered in-flow (takes vertical space in the
+      // cell) rather than floating at page level.
       const textBoxBlock = block as TextBoxBlock;
       const textBoxMeasure = measure as TextBoxMeasure;
       const effectiveSpaceBefore = previousParagraphAfter;
@@ -229,8 +229,7 @@ function renderCellContent(
       const boxEl = renderTextBoxFragment(fragment, textBoxBlock, textBoxMeasure, context, {
         document: doc,
       });
-      // renderTextBoxFragment positions absolutely (page float); override to
-      // flow inside the cell.
+      // renderTextBoxFragment positions absolutely; override to flow in-cell.
       boxEl.style.position = 'relative';
       if (effectiveSpaceBefore > 0) {
         boxEl.style.marginTop = `${effectiveSpaceBefore}px`;
