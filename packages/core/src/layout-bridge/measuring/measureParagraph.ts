@@ -291,6 +291,51 @@ function measureInlineWidthAfterTab(runs: Run[], tabIndex: number): number {
   return width;
 }
 
+/** A soft-wrap opportunity follows a space, hyphen, or tab (matches `findWordBreaks`). */
+function isBreakChar(c: string): boolean {
+  return c === ' ' || c === '-' || c === '\t';
+}
+
+/**
+ * Width of the unbreakable text that is "glued" to the end of run `afterIdx` —
+ * i.e. the content in the following runs up to the first soft-wrap opportunity.
+ *
+ * The line-breaker walks runs sequentially and would otherwise treat every run
+ * boundary as a break opportunity. That is wrong: a footnote-reference run
+ * ("¹") or a format-only split ("**bold**word") sits flush against the previous
+ * run with no whitespace between them, so the two form a single unbreakable
+ * cluster that Word never splits across lines. When the last word of a run has
+ * no trailing break char, we add this glue width to the wrap decision so the
+ * break lands *before* the whole cluster instead of inside it.
+ *
+ * Gluing continues across runs while each run is one unbreakable token (no
+ * break char anywhere); it stops at the first run that starts with whitespace,
+ * contains a break char, or is not a text run.
+ */
+function trailingGlueWidth(runs: Run[], afterIdx: number): number {
+  let total = 0;
+  for (let i = afterIdx + 1; i < runs.length; i++) {
+    const r = runs[i];
+    if (!isTextRun(r)) break;
+    const t = r.text;
+    if (!t) continue;
+    if (isBreakChar(t[0])) break;
+    const style = runToFontStyle(r);
+    const breaks = findWordBreaks(t);
+    if (breaks.length === 0) {
+      // Whole run is a single token with no trailing break — keep gluing.
+      total += measureTextWidth(t, style);
+      continue;
+    }
+    // A break opportunity exists within this run: include only the leading
+    // token (trailing space trimmed; a hyphen stays, it is part of the unit).
+    const leading = t.slice(0, breaks[0]).replace(/[ \t]+$/, '');
+    total += measureTextWidth(leading, style);
+    break;
+  }
+  return total;
+}
+
 /**
  * Find word break points in text
  * Returns array of indices where words end (after space/punctuation)
@@ -929,10 +974,20 @@ export function measureParagraph(
           continue;
         }
 
-        // Check if word fits on current line
+        // Check if word fits on current line. If this is the run's last word
+        // and it has no trailing break char, it is glued to the content that
+        // follows in the next run(s) (e.g. a footnote-reference superscript, or
+        // a format-only split mid-word) — fold that glue width into the wrap
+        // decision so the break falls *before* the whole unbreakable cluster
+        // rather than between the two runs.
+        const isRunTail = nextBreak === text.length;
+        const glueWidth =
+          isRunTail && word.length > 0 && !isBreakChar(word[word.length - 1])
+            ? trailingGlueWidth(runs, runIndex)
+            : 0;
         if (
           currentLine.width > 0 &&
-          currentLine.width + wordWidth > currentLine.availableWidth + WIDTH_TOLERANCE
+          currentLine.width + wordWidth + glueWidth > currentLine.availableWidth + WIDTH_TOLERANCE
         ) {
           // Word doesn't fit, start new line
           startNewLine(runIndex, charIndex);
