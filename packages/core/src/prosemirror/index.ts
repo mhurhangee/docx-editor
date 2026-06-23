@@ -164,8 +164,9 @@ export {
   insertPageBreak,
   // Table of Contents
   generateTOC,
+  generateTableOfContents,
 } from './commands';
-export type { TableContextInfo, BorderPreset } from './commands';
+export type { TableContextInfo, BorderPreset, GenerateTOCOptions } from './commands';
 
 /** Block content-control (SDT) discovery + edit on the live PM state. */
 export {

@@ -18,8 +18,8 @@ import type {
 import { singletonManager } from '../schema';
 
 // Re-export types and query helpers from extensions
-import type { ResolvedStyleAttrs } from '../extensions/core/ParagraphExtension';
-export type { ResolvedStyleAttrs } from '../extensions/core/ParagraphExtension';
+import type { ResolvedStyleAttrs, GenerateTOCOptions } from '../extensions/core/ParagraphExtension';
+export type { ResolvedStyleAttrs, GenerateTOCOptions } from '../extensions/core/ParagraphExtension';
 export {
   getParagraphAlignment,
   getStyleId,
@@ -115,3 +115,14 @@ export const setLtr: Command = cmds.setLtr();
 
 // Table of Contents
 export const generateTOC: Command = cmds.generateTOC();
+
+/**
+ * Options-aware Table of Contents command. Scope the heading levels, set a
+ * custom title (or omit it with `null`/`""`), and toggle hyperlinked entries.
+ * Omitting `options` is equivalent to the {@link generateTOC} default.
+ *
+ * @public
+ */
+export function generateTableOfContents(options?: GenerateTOCOptions): Command {
+  return cmds.generateTOC(options);
+}

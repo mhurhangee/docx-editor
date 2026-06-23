@@ -487,6 +487,34 @@ function setParagraphAttrsCmd(attrs: Record<string, unknown>): Command {
 // RESOLVED STYLE ATTRS (for applyStyle)
 // ============================================================================
 
+/**
+ * Options for {@link generateTOC} / `generateTableOfContents`. All fields are
+ * optional; omitting them reproduces the historical no-argument behavior
+ * (every heading level, a "Table of Contents" title, hyperlinked entries).
+ *
+ * @public
+ */
+export interface GenerateTOCOptions {
+  /**
+   * Lowest heading level to include (1 = Heading 1). Default `1`. Values are
+   * clamped to 1–9, and an inverted range (`minLevel > maxLevel`) is ordered
+   * rather than producing an empty TOC.
+   */
+  minLevel?: number;
+  /** Highest heading level to include (e.g. `3` = Heading 3). Default `9`. Clamped to 1–9. */
+  maxLevel?: number;
+  /**
+   * TOC title text. Default `"Table of Contents"`. Pass `null` or `""` to omit
+   * the title paragraph entirely.
+   */
+  title?: string | null;
+  /**
+   * Whether each entry is a clickable internal bookmark hyperlink. Default
+   * `true`. When `false`, entries are plain text (headings are still bookmarked).
+   */
+  includeHyperlinks?: boolean;
+}
+
 export interface ResolvedStyleAttrs {
   paragraphFormatting?: ParagraphFormatting;
   runFormatting?: TextFormatting;
@@ -775,12 +803,30 @@ export const ParagraphExtension = createNodeExtension({
         insertSectionBreak: (breakType: 'nextPage' | 'continuous' | 'oddPage' | 'evenPage') =>
           setParagraphAttr('sectionBreakType', breakType),
         removeSectionBreak: () => setParagraphAttr('sectionBreakType', null),
-        generateTOC: () => {
+        generateTOC: (options?: GenerateTOCOptions) => {
+          // Clamp the level range into the valid 1–9 band and tolerate an
+          // inverted range (min > max) by ordering the pair — a misconfigured
+          // range should produce a sensible TOC rather than silently filtering
+          // out every heading (which is indistinguishable from "no headings").
+          const rawMin = options?.minLevel ?? 1;
+          const rawMax = options?.maxLevel ?? 9;
+          const clampLevel = (n: number) => Math.min(Math.max(n, 1), 9);
+          const minLevel = clampLevel(Math.min(rawMin, rawMax));
+          const maxLevel = clampLevel(Math.max(rawMin, rawMax));
+          const includeHyperlinks = options?.includeHyperlinks ?? true;
+          // `undefined` (option omitted) keeps the default title; an explicit
+          // `null` / `''` omits the title paragraph.
+          const title = options?.title === undefined ? 'Table of Contents' : options.title;
           return (
             state: EditorState,
             dispatch?: (tr: import('prosemirror-state').Transaction) => void
           ) => {
-            const headings = collectHeadings(state.doc);
+            // `collectHeadings` reports a 0-based level (0 = Heading 1); the
+            // public level range is 1-based, so compare against `level + 1`.
+            const headings = collectHeadings(state.doc).filter((h) => {
+              const displayLevel = h.level + 1;
+              return displayLevel >= minLevel && displayLevel <= maxLevel;
+            });
             if (headings.length === 0) return false;
             if (!dispatch) return true;
 
@@ -818,18 +864,22 @@ export const ParagraphExtension = createNodeExtension({
             // Build TOC paragraphs
             const tocNodes: import('prosemirror-model').Node[] = [];
 
-            // TOC title
-            tocNodes.push(
-              s.node('paragraph', { styleId: 'TOCHeading', alignment: 'center' }, [
-                s.text('Table of Contents', [s.marks.bold.create()]),
-              ])
-            );
+            // TOC title (omitted when `title` is null/empty)
+            if (title) {
+              tocNodes.push(
+                s.node('paragraph', { styleId: 'TOCHeading', alignment: 'center' }, [
+                  s.text(title, [s.marks.bold.create()]),
+                ])
+              );
+            }
 
-            // TOC entries with hyperlinks
+            // TOC entries — clickable bookmark hyperlinks unless disabled
             for (const entry of bookmarkEntries) {
               const indent = entry.level * 720; // 0.5 inch per level in twips
               const tocStyleId = `TOC${entry.level + 1}`; // TOC1, TOC2, etc.
-              const linkMark = s.marks.hyperlink.create({ href: `#${entry.name}` });
+              const marks = includeHyperlinks
+                ? [s.marks.hyperlink.create({ href: `#${entry.name}` })]
+                : [];
 
               tocNodes.push(
                 s.node(
@@ -838,7 +888,7 @@ export const ParagraphExtension = createNodeExtension({
                     styleId: tocStyleId,
                     indentLeft: indent > 0 ? indent : null,
                   },
-                  [s.text(entry.text, [linkMark])]
+                  [s.text(entry.text, marks)]
                 )
               );
             }

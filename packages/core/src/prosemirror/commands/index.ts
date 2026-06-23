@@ -73,7 +73,7 @@ export {
   setRtl,
   setLtr,
 } from './paragraph';
-export type { ResolvedStyleAttrs } from './paragraph';
+export type { ResolvedStyleAttrs, GenerateTOCOptions } from './paragraph';
 
 // Table operations
 export {
@@ -130,7 +130,7 @@ export {
 export type { AnchorWrapType, ImageLayoutTarget, SetImageWrapTypeOptions } from './image';
 
 // Table of Contents
-export { generateTOC } from './paragraph';
+export { generateTOC, generateTableOfContents } from './paragraph';
 
 // Comments and Track Changes
 export {
