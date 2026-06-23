@@ -1,5 +1,24 @@
 # @eigenpal/docx-editor-core
 
+## 1.10.0
+
+### Minor Changes
+
+- 18a686d: Add `generateTableOfContents(options)` — an options-aware Table of Contents command — and a `GenerateTOCOptions` type, exported from `@eigenpal/docx-editor-core/prosemirror/commands` (and the `prosemirror` barrel).
+
+  Options: `minLevel` / `maxLevel` (heading-level range, 1-based), `title` (custom title text; `null`/`""` omits the title paragraph), and `includeHyperlinks` (toggle clickable entries). Omitting `options` reproduces the historical behavior, and the existing `generateTOC: Command` export is unchanged — so current callers (including the React toolbar's Insert → Table of Contents) are unaffected. Useful for headless/programmatic TOC generation. Closes #986.
+
+### Patch Changes
+
+- 00c015b: Fix headless agent edits corrupting the document. `cloneDocument` (run on every agent edit) used `JSON.parse(JSON.stringify())`, which silently dropped values JSON can't represent: the `headers`/`footers`/`media` `Map`s became `{}` and `originalBuffer` became `{}`. As a result, the first edit broke export — `repackDocx` threw `Can't read the data of 'the loaded zip file'` (dead `originalBuffer`) or `map.entries is not a function` (dead headers/footers) — and dropped every image. Clone with `structuredClone` instead, sharing the read-only `originalBuffer` and shallow-copying the immutable `media` map so large binary payloads aren't copied on every edit.
+- a631be1: Keep a footnote/endnote reference superscript on the same line as the word it follows. The line-breaker treated every run boundary as a wrap opportunity, so a reference mark with no space before it (e.g. `copyright.¹`) could split onto the next line. Adjacent runs with no whitespace between them now wrap as one unbreakable cluster, matching Word.
+- 7a03c16: Footnote and endnote reference marks are now superscript only when their character style (or run) actually specifies it, matching Word. Previously every anchor was force-raised, so an unstyled anchor (e.g. Pandoc output with a bare `<w:r><w:footnoteReference/></w:r>`) rendered superscript in the editor while Word showed it at the baseline. Superscript now flows solely from the resolved `FootnoteReference`/`EndnoteReference` style chain or the run's own `vertAlign`.
+- c1871b5: Harden handling of untrusted input: reject zip-bomb DOCX archives (per-entry and total decompression limits), constrain rendered image sources to safe URL schemes, validate agent/MCP edit positions before they touch the document, cap the MCP stdio input buffer, drop prototype-polluting keys in the VML style parser, and validate DrawingML color values at the parse boundary.
+- dc3d694: Grow each section's header/footer band from that section's own margins. A section with thin margins (e.g. a landscape table section with a 0.5in bottom margin) embedded in a roomier 1in-margin body previously never grew its footer band, so the footer overlapped the footnote area and the page number rode up beside the last footnote instead of sitting below it. The overflow is now decided per margin set.
+- 7a94b49: Preserve block-level bookmarks and text-box text on save. Bookmarks (`w:bookmarkStart`/`w:bookmarkEnd`) placed between block elements — in the body, table cells, headers/footers, or content controls — are no longer dropped when a document is opened and saved, so cross-references, hyperlinks and table-of-contents entries that point at them keep working. Text inside shapes/text boxes whose geometry is not exactly `textBox` (e.g. `rect` AlternateContent fallbacks) is also preserved instead of being discarded. Text boxes anchored from a run nested inside an inline content control or hyperlink (e.g. a confidentiality notice on a page-number control in a footer), or from a run inside a table cell, are preserved too, instead of being silently dropped at parse time. This preservation now holds through the interactive editor as well: opening a document and exporting it — even with no edits — keeps these elements, not only the programmatic save path.
+- 53ede3c: Anchor the hidden ProseMirror caret to the painted caret so CJK IME candidate windows appear near the visible insertion point.
+- 5e7120b: Paste from Word now keeps text and formatting instead of inserting a bitmap snapshot of the selection. When the clipboard carries rich HTML alongside an image, the editor routes it through the normal paste pipeline (both keyboard paste and the Vue right-click Paste). Fixes #981
+
 ## 1.9.0
 
 ### Minor Changes
