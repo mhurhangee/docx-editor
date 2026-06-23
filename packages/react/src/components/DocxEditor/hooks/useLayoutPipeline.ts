@@ -74,6 +74,13 @@ export interface UseLayoutPipelineOptions {
    * for HF instances without a mounted PM (boot, or rId not yet projected).
    */
   getHfPmDoc?: (hf: HeaderFooter) => PMNode | null;
+  /**
+   * Resolve the current PM document for a footnote by id, when its lazy single
+   * hidden PM EditorView is mounted (i.e. it is the actively-edited footnote).
+   * Mirrors `getHfPmDoc`; returns null for footnotes without a live PM so the
+   * painter falls back to `Footnote.content`.
+   */
+  getFootnotePmDoc?: (footnoteId: number) => PMNode | null;
   pageGap: number;
   zoom: number;
   resolvedCommentIds?: Set<number>;
@@ -110,6 +117,7 @@ export function useLayoutPipeline(opts: UseLayoutPipelineOptions): UseLayoutPipe
     firstPageHeaderContent,
     firstPageFooterContent,
     getHfPmDoc,
+    getFootnotePmDoc,
     pageGap,
     zoom,
     resolvedCommentIds,
@@ -140,10 +148,12 @@ export function useLayoutPipeline(opts: UseLayoutPipelineOptions): UseLayoutPipe
   const onAnchorPositionsChangeRef = useRef(onAnchorPositionsChange);
   const onRenderedDomContextReadyRef = useRef(onRenderedDomContextReady);
   const getHfPmDocRef = useRef(getHfPmDoc);
+  const getFootnotePmDocRef = useRef(getFootnotePmDoc);
   onTotalPagesChangeRef.current = onTotalPagesChange;
   onAnchorPositionsChangeRef.current = onAnchorPositionsChange;
   onRenderedDomContextReadyRef.current = onRenderedDomContextReady;
   getHfPmDocRef.current = getHfPmDoc;
+  getFootnotePmDocRef.current = getFootnotePmDoc;
 
   // Total-pages notifier — fires only when count changes (including N → 0).
   const lastTotalPagesRef = useRef<number>(0);
@@ -249,6 +259,7 @@ export function useLayoutPipeline(opts: UseLayoutPipelineOptions): UseLayoutPipe
           firstPageFooterContent,
           measureBlocks,
           getHfPmDoc: (hf) => getHfPmDocRef.current?.(hf) ?? null,
+          getFootnotePmDoc: (id) => getFootnotePmDocRef.current?.(id) ?? null,
         });
         setBlocks(newBlocks);
         setMeasures(newMeasures);

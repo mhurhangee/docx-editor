@@ -28,6 +28,7 @@ import type { CaretPosition, SelectionRect } from '@eigenpal/docx-editor-core/la
 import {
   clickToPosition,
   clickToPositionDom,
+  findPositionInSpan,
   detectTableInsertHover,
   hitTestFragment,
   hitTestTableCell,
@@ -78,6 +79,27 @@ export interface UsePagesPointerOptions {
    * stays single-surface and only the body PM receives input.
    */
   getHfView?: () => EditorView | null;
+  /**
+   * Active footnote EditorView lookup — when `footnoteEditId` is set AND this
+   * resolves, every gesture routes through the footnote's hidden view instead
+   * of the body PM (mirrors `getHfView`).
+   */
+  getFootnoteView?: () => EditorView | null;
+  /**
+   * Id of the footnote currently in edit mode, or null. A click inside a
+   * painted `.layout-footnote-content[data-footnote-id]` sets it; a click
+   * outside any footnote clears it. Threaded so the surface router knows when
+   * the footnote PM is the active surface.
+   */
+  footnoteEditId?: number | null;
+  /** Enter/exit footnote-edit mode for a given footnote id (null = exit). */
+  setFootnoteEditId?: (id: number | null) => void;
+  /**
+   * Exit footnote-edit mode and restore body focus + caret at `pos` (deferred
+   * past the footnote view teardown). Use on a body click that should resume
+   * body editing in the same gesture, instead of a bare `setFootnoteEditId(null)`.
+   */
+  exitFootnoteToBody?: (pos: number | null) => void;
   layout: Layout | null;
   blocks: FlowBlock[];
   measures: Measure[];
@@ -172,11 +194,95 @@ function wrapEditorViewAsSurface(view: EditorView): ActivePmSurface {
   };
 }
 
+/**
+ * Resolve the painted footnote a click landed in. Footnote PM positions
+ * collide across footnotes (each footnote is its own PM doc, all starting at
+ * 0), so callers MUST scope every span query to the returned `container` —
+ * never the whole page — or a click in footnote B would snap to a span from
+ * footnote A at the same numeric position. Returns null when the target is
+ * not inside any `.layout-footnote-content[data-footnote-id]`.
+ */
+export function resolveFootnoteHit(
+  target: HTMLElement
+): { id: number; container: HTMLElement } | null {
+  const container = target.closest('.layout-footnote-content') as HTMLElement | null;
+  if (!container) return null;
+  const raw = container.dataset.footnoteId;
+  if (raw === undefined) return null;
+  const id = Number(raw);
+  if (!Number.isFinite(id)) return null;
+  return { id, container };
+}
+
+/**
+ * Snap a click to the nearest `span[data-pm-start][data-pm-end]` WITHIN a
+ * single scoped subtree (a footnote container or an HF host). Returns the PM
+ * position in that subtree's document, or null when no span brackets the y.
+ */
+/**
+ * Resolve a click to a PM position inside the actively-edited footnote, scoped
+ * to that footnote's container. Glyph-accurate first (`findPositionInSpan` on
+ * the span under the cursor — so "click between the two e's in employee" lands
+ * between them, not at the word end); coarse nearest-span snap as fallback.
+ */
+function footnotePosAtPoint(footnoteId: number, clientX: number, clientY: number): number | null {
+  const els = Array.from(window.document.elementsFromPoint(clientX, clientY)) as HTMLElement[];
+  for (const el of els) {
+    if (
+      el.tagName === 'SPAN' &&
+      el.dataset.pmStart !== undefined &&
+      el.dataset.pmEnd !== undefined
+    ) {
+      const container = el.closest('.layout-footnote-content') as HTMLElement | null;
+      if (container?.dataset.footnoteId === String(footnoteId)) {
+        const precise = findPositionInSpan(el, clientX, clientY);
+        if (precise !== null) return precise;
+      }
+    }
+  }
+  for (const el of els) {
+    const hit = resolveFootnoteHit(el);
+    if (hit && hit.id === footnoteId) return snapToScopedSpan(hit.container, clientX, clientY);
+  }
+  return null;
+}
+
+function snapToScopedSpan(scope: HTMLElement, clientX: number, clientY: number): number | null {
+  const spans = Array.from(scope.querySelectorAll<HTMLElement>('span[data-pm-start][data-pm-end]'));
+  let best: { pos: number; dist: number } | null = null;
+  for (const span of spans) {
+    const r = span.getBoundingClientRect();
+    if (clientY < r.top - 4 || clientY > r.bottom + 4) continue;
+    const pmStart = Number(span.dataset.pmStart);
+    const pmEnd = Number(span.dataset.pmEnd);
+    if (!Number.isFinite(pmStart) || !Number.isFinite(pmEnd)) continue;
+    let pos: number;
+    let dist: number;
+    if (clientX < r.left) {
+      pos = pmStart;
+      dist = r.left - clientX;
+    } else if (clientX > r.right) {
+      pos = pmEnd;
+      dist = clientX - r.right;
+    } else {
+      const ratio = (clientX - r.left) / Math.max(1, r.width);
+      pos = pmStart + Math.round(ratio * (pmEnd - pmStart));
+      dist = 0;
+    }
+    if (!best || dist < best.dist) best = { pos, dist };
+  }
+  return best?.pos ?? null;
+}
+
 export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerReturn {
   const {
     pagesContainerRef,
     hiddenPMRef,
     getHfView,
+    getFootnoteView,
+    footnoteEditId,
+    setFootnoteEditId,
+    exitFootnoteToBody,
     layout,
     blocks,
     measures,
@@ -248,6 +354,15 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
     (clientX: number, clientY: number): number | null => {
       if (!pagesContainerRef.current || !layout) return null;
 
+      // Footnote edit mode: a footnote PM doc has its own position space that
+      // collides with the body's, so when a footnote is active we MUST resolve
+      // strictly within the painted footnote container — never fall through to
+      // `clickToPositionDom`/geometry (which return BODY positions). Scope the
+      // span-snap to the active footnote's element only.
+      if (footnoteEditId != null) {
+        return footnotePosAtPoint(footnoteEditId, clientX, clientY);
+      }
+
       const domPos = clickToPositionDom(pagesContainerRef.current, clientX, clientY, zoom);
       if (domPos !== null) return domPos;
 
@@ -266,35 +381,10 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
         if (!hfHost) return null;
         // Walk every painted span in the HF host; pick the closest by horizontal
         // distance on the same line (within span vertical bounds).
-        const host = hfHost.closest('.layout-page-header') ?? hfHost.closest('.layout-page-footer');
+        const host = (hfHost.closest('.layout-page-header') ??
+          hfHost.closest('.layout-page-footer')) as HTMLElement | null;
         if (!host) return null;
-        const spans = Array.from(
-          host.querySelectorAll<HTMLElement>('span[data-pm-start][data-pm-end]')
-        );
-        let best: { pos: number; dist: number } | null = null;
-        for (const span of spans) {
-          const r = span.getBoundingClientRect();
-          if (clientY < r.top - 4 || clientY > r.bottom + 4) continue;
-          const pmStart = Number(span.dataset.pmStart);
-          const pmEnd = Number(span.dataset.pmEnd);
-          if (!Number.isFinite(pmStart) || !Number.isFinite(pmEnd)) continue;
-          // Snap to span edge nearest the cursor.
-          let pos: number;
-          let dist: number;
-          if (clientX < r.left) {
-            pos = pmStart;
-            dist = r.left - clientX;
-          } else if (clientX > r.right) {
-            pos = pmEnd;
-            dist = clientX - r.right;
-          } else {
-            const ratio = (clientX - r.left) / Math.max(1, r.width);
-            pos = pmStart + Math.round(ratio * (pmEnd - pmStart));
-            dist = 0;
-          }
-          if (!best || dist < best.dist) best = { pos, dist };
-        }
-        return best?.pos ?? null;
+        return snapToScopedSpan(host, clientX, clientY);
       }
 
       const pageElements = pagesContainerRef.current.querySelectorAll('.layout-page');
@@ -336,7 +426,7 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
       }
       return clickToPosition(fragmentHit);
     },
-    [layout, blocks, measures, zoom, hfEditMode, pagesContainerRef]
+    [layout, blocks, measures, zoom, hfEditMode, footnoteEditId, pagesContainerRef]
   );
 
   /**
@@ -349,12 +439,16 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
   // Holding it as a function (not a value) lets the closure see the latest
   // `hfEditMode` on each gesture without rebuilding handler callbacks.
   const activeSurface = useCallback((): ActivePmSurface | null => {
+    if (footnoteEditId != null && getFootnoteView) {
+      const fnView = getFootnoteView();
+      if (fnView) return wrapEditorViewAsSurface(fnView);
+    }
     if (hfEditMode && getHfView) {
       const hfView = getHfView();
       if (hfView) return wrapEditorViewAsSurface(hfView);
     }
     return hiddenPMRef.current;
-  }, [hfEditMode, getHfView, hiddenPMRef]);
+  }, [footnoteEditId, getFootnoteView, hfEditMode, getHfView, hiddenPMRef]);
 
   const findCellPosFromPmPos = useCallback(
     (pmPos: number): number | null => {
@@ -418,6 +512,61 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
         }
       }
 
+      // Footnote edit mode carve-out (mirrors the HF block above): click inside a
+      // painted footnote → enter/switch footnote-edit mode + place caret; click
+      // outside while editing → exit to body. The view mounts lazily after
+      // `setFootnoteEditId` commits, so a short rAF poll places the caret.
+      const fnHit = resolveFootnoteHit(target);
+      if (fnHit && setFootnoteEditId) {
+        e.preventDefault();
+        e.stopPropagation();
+        const entering = fnHit.id !== footnoteEditId;
+        if (entering) setFootnoteEditId(fnHit.id);
+        // Resolve the clicked position now (DOM-based) and arm drag-select from
+        // it; the move handler extends through the footnote surface like the body.
+        const anchorPos = footnotePosAtPoint(fnHit.id, e.clientX, e.clientY);
+        cellDragRef.current.begin(null);
+        if (anchorPos !== null) {
+          dragAnchorRef.current = anchorPos;
+          isDraggingRef.current = true;
+        }
+        const placeCaret = (attempt: number) => {
+          const view = getFootnoteView?.() ?? null;
+          if (!view) {
+            if (attempt < 10) requestAnimationFrame(() => placeCaret(attempt + 1));
+            return;
+          }
+          const surf = wrapEditorViewAsSurface(view);
+          if (anchorPos !== null) surf.setSelection(anchorPos);
+          surf.focus();
+        };
+        if (entering) requestAnimationFrame(() => placeCaret(0));
+        else placeCaret(0);
+        return;
+      }
+      if (footnoteEditId != null && (exitFootnoteToBody || setFootnoteEditId)) {
+        // Click landed outside any footnote while one is active → exit
+        // footnote-edit mode and place the body caret where the user clicked.
+        // Can't fall through to the body block below:
+        //   1. `surface` was resolved at the top of the handler while
+        //      `footnoteEditId` was still set, so it's the FOOTNOTE view —
+        //      using it would mis-route the body caret/focus into the note.
+        //   2. `getPositionFromMouse` is footnote-scoped while a footnote is
+        //      active (resolves strictly within the painted note), so it
+        //      returns null for a body click.
+        // Resolve the body position directly, then hand off via
+        // `exitFootnoteToBody`, which defers the body focus past the footnote
+        // view's teardown (otherwise the destroy-blur steals it).
+        e.preventDefault();
+        e.stopPropagation();
+        const bodyPos = pagesContainerRef.current
+          ? clickToPositionDom(pagesContainerRef.current, e.clientX, e.clientY, zoom)
+          : null;
+        if (exitFootnoteToBody) exitFootnoteToBody(bodyPos);
+        else setFootnoteEditId?.(null);
+        return;
+      }
+
       // Table resize handles (column-between, row, right-edge). Body OR
       // header tables — `tableResize.tryStartFromMouseDown` doesn't care
       // which document the cells belong to, only that the click landed on
@@ -472,6 +621,10 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
       activeSurface,
       readOnly,
       hfEditMode,
+      footnoteEditId,
+      setFootnoteEditId,
+      exitFootnoteToBody,
+      getFootnoteView,
       onBodyClick,
       getPositionFromMouse,
       findCellPosFromPmPos,
@@ -482,6 +635,9 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
       setCaretPosition,
       buildImageSelectionInfo,
       setIsFocused,
+      zoom,
+      pagesContainerRef,
+      hiddenPMRef,
     ]
   );
 

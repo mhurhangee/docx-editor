@@ -86,7 +86,9 @@ import {
   applySdtFocus,
 } from '@eigenpal/docx-editor-core/layout-painter';
 import type { Document } from '@eigenpal/docx-editor-core/types/document';
+import type { Node as PMNode } from 'prosemirror-model';
 import type { LayoutSelectionGate } from '@eigenpal/docx-editor-core/prosemirror';
+import { useFootnotePM } from './useFootnotePM';
 
 // ProseMirror CSS — must be imported for the hidden editor to work
 import 'prosemirror-view/style/prosemirror.css';
@@ -275,6 +277,30 @@ export interface UseDocxEditorReturn {
   ) => void;
   /** Publish a fresh Document object (used by HF materialisation). */
   setDocument: (doc: Document) => void;
+  /**
+   * Id of the footnote currently in the lazy single hidden footnote PM, or
+   * null. Reactive — the click router and overlay read it to know which
+   * painted `.layout-footnote-content` is the active edit surface.
+   */
+  footnoteEditId: Ref<number | null>;
+  /** Enter/switch/exit footnote-edit mode for a footnote id (null = exit). */
+  setFootnoteEditId: (id: number | null) => void;
+  /** Resolve the live footnote EditorView (the lazy single slot), or null. */
+  getFootnoteView: () => EditorView | null;
+  /**
+   * Exit footnote-edit mode and restore body focus + caret at `pos` (deferred
+   * past the footnote view teardown). Use on a body click that should resume
+   * body editing in the same gesture, instead of a bare `setFootnoteEditId(null)`.
+   */
+  exitFootnoteToBody: (pos: number | null) => void;
+  /**
+   * Subscribe to every footnote-PM transaction. Footnote analogue of
+   * `setHfTransactionListener` — DocxEditor.vue uses it to recompute the
+   * painted-footnote caret/selection overlay and toolbar selection state.
+   */
+  setFootnoteTransactionListener: (
+    cb: ((id: number, view: EditorView, docChanged: boolean) => void) | null
+  ) => void;
 }
 
 export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorReturn {
@@ -382,6 +408,11 @@ export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorRetur
         firstPageFooterContent: firstFooter,
         measureBlocks,
         getHfPmDoc: (hf) => getHfPmView(hf)?.state.doc ?? null,
+        // Painter reads the live footnote doc only for the actively-edited
+        // footnote (lazy single slot); other footnotes render from their
+        // stored `Footnote.content`. Mirrors React's `getFootnotePmDoc` seam.
+        getFootnotePmDoc: (id: number): PMNode | null =>
+          id === footnoteEditId.value ? (getFootnoteView()?.state.doc ?? null) : null,
       });
 
       layout.value = newLayout;
@@ -784,6 +815,29 @@ export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorRetur
   }
 
   // ========================================================================
+  // Lazy single hidden footnote PM (Vue parity for editable footnotes —
+  // mirrors React's HiddenFootnotePM + useFootnoteEditState). Extracted into
+  // `useFootnotePM` so this file stays under the max-lines cap; the painter
+  // reads `view.state.doc` via the `getFootnotePmDoc` seam wired into
+  // `computeLayout` above (`footnoteEditId.value`/`getFootnoteView()`).
+  // ========================================================================
+  const {
+    footnoteEditId,
+    setFootnoteEditId,
+    getFootnoteView,
+    exitFootnoteToBody,
+    setFootnoteTransactionListener,
+    destroyFootnotePM,
+  } = useFootnotePM({
+    document,
+    editorView,
+    editorState,
+    runLayoutPipeline,
+    editorMode,
+    author,
+  });
+
+  // ========================================================================
   // Document loading
   // ========================================================================
 
@@ -811,6 +865,7 @@ export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorRetur
       // Recreate PM view with new document
       destroyEditorView();
       destroyHfPMs();
+      destroyFootnotePM();
       createEditorView();
       syncHfPMs();
     } catch (err) {
@@ -826,6 +881,7 @@ export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorRetur
     updateDocumentFonts(doc);
     destroyEditorView();
     destroyHfPMs();
+    destroyFootnotePM();
     createEditorView();
     syncHfPMs();
   }
@@ -878,6 +934,7 @@ export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorRetur
   function destroy() {
     destroyEditorView(); // cancels the layout scheduler
     destroyHfPMs();
+    destroyFootnotePM();
     document.value = null;
   }
 
@@ -933,5 +990,14 @@ export function useDocxEditor(options: UseDocxEditorOptions): UseDocxEditorRetur
     setDocument(doc: Document) {
       document.value = doc;
     },
+
+    // Editable-footnote surface (Vue parity with React's HiddenFootnotePM +
+    // useFootnoteEditState). Lazy single hidden footnote PM; click routing +
+    // overlay live in usePagesPointer / DocxEditor.vue.
+    footnoteEditId,
+    setFootnoteEditId,
+    getFootnoteView,
+    exitFootnoteToBody,
+    setFootnoteTransactionListener,
   };
 }

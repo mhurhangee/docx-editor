@@ -91,8 +91,17 @@ export function clickToPositionDom(
 
 /**
  * Find exact position within a text span using binary search on character boundaries.
+ *
+ * Exported so adapters can do glyph-accurate intra-span resolution when they
+ * already hold the target span (e.g. footnote-edit click routing, which must
+ * scope to one `.layout-footnote-content` and so can't call the page-wide
+ * `clickToPositionDom`). The span must carry `data-pm-start`/`data-pm-end`.
  */
-function findPositionInSpan(spanEl: HTMLElement, clientX: number, _clientY: number): number | null {
+export function findPositionInSpan(
+  spanEl: HTMLElement,
+  clientX: number,
+  _clientY: number
+): number | null {
   const pmStart = Number(spanEl.dataset.pmStart);
   const pmEnd = Number(spanEl.dataset.pmEnd);
 

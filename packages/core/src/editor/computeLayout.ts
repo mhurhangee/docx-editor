@@ -91,6 +91,12 @@ export interface ComputeLayoutInputs {
   measureBlocks: MeasureBlocksFn;
   /** HF unification: the persistent PM doc for an HF, or null to re-parse content. */
   getHfPmDoc: (hf: HeaderFooter) => PMNode | null | undefined;
+  /**
+   * Footnote-edit unification: the live persistent PM doc for a footnote id, or
+   * null/undefined to re-parse the stored content. Mirrors `getHfPmDoc`. Absent
+   * (the default) ⇒ footnote layout is byte-identical to today.
+   */
+  getFootnotePmDoc?: (footnoteId: number) => PMNode | null | undefined;
 }
 
 export interface LayoutComputation {
@@ -174,6 +180,7 @@ export function computeLayout(inputs: ComputeLayoutInputs): LayoutComputation {
     firstPageFooterContent,
     measureBlocks,
     getHfPmDoc,
+    getFootnotePmDoc,
   } = inputs;
 
   // Step 1: PM doc → flow blocks.
@@ -294,6 +301,7 @@ export function computeLayout(inputs: ComputeLayoutInputs): LayoutComputation {
         theme: theme ?? null,
         measureBlocks,
         defaultTabStopTwips,
+        getFootnotePmDoc,
       }
     );
     const stabilized = stabilizeFootnoteLayout({

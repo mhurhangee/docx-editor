@@ -97,9 +97,80 @@ export interface UsePagesPointerOptions {
    * callers fall back to in-place mutation + `syncHfPMs()`.
    */
   setDocument?: (doc: Document) => void;
+  // ── Editable-footnote routing (Vue parity with React's usePagesPointer) ──
+  /**
+   * Active footnote EditorView lookup — when `footnoteEditId` is set AND this
+   * resolves, every gesture routes through the footnote's hidden view instead
+   * of the body PM (mirrors `getHfPmView`/`activeView`).
+   */
+  getFootnoteView?: () => EditorView | null;
+  /** Id of the footnote currently in edit mode, or null (reactive). */
+  footnoteEditId?: Ref<number | null>;
+  /** Enter/switch/exit footnote-edit mode for a footnote id (null = exit). */
+  setFootnoteEditId?: (id: number | null) => void;
+  /**
+   * Exit footnote-edit mode and restore body focus + caret at `pos` (deferred
+   * past the footnote view teardown). Use on a body click that should resume
+   * body editing in the same gesture.
+   */
+  exitFootnoteToBody?: (pos: number | null) => void;
 }
 
 const MULTI_CLICK_DELAY = 500;
+
+/**
+ * Resolve the painted footnote a click landed in. Footnote PM positions
+ * collide across footnotes (each footnote is its own PM doc, all starting at
+ * 0), so callers MUST scope every span query to the returned `container` —
+ * never the whole page — or a click in footnote B would snap to a span from
+ * footnote A at the same numeric position. Returns null when the target is
+ * not inside any `.layout-footnote-content[data-footnote-id]`. Mirrors React's
+ * `resolveFootnoteHit`.
+ */
+export function resolveFootnoteHit(
+  target: HTMLElement
+): { id: number; container: HTMLElement } | null {
+  const container = target.closest('.layout-footnote-content') as HTMLElement | null;
+  if (!container) return null;
+  const raw = container.dataset.footnoteId;
+  if (raw === undefined) return null;
+  const id = Number(raw);
+  if (!Number.isFinite(id)) return null;
+  return { id, container };
+}
+
+/**
+ * Snap a click to the nearest `span[data-pm-start][data-pm-end]` WITHIN a
+ * single scoped subtree (a footnote container). Returns the PM position in
+ * that subtree's document, or null when no span brackets the y. Mirrors
+ * React's `snapToScopedSpan`.
+ */
+function snapToScopedSpan(scope: HTMLElement, clientX: number, clientY: number): number | null {
+  const spans = Array.from(scope.querySelectorAll<HTMLElement>('span[data-pm-start][data-pm-end]'));
+  let best: { pos: number; dist: number } | null = null;
+  for (const span of spans) {
+    const r = span.getBoundingClientRect();
+    if (clientY < r.top - 4 || clientY > r.bottom + 4) continue;
+    const pmStart = Number(span.dataset.pmStart);
+    const pmEnd = Number(span.dataset.pmEnd);
+    if (!Number.isFinite(pmStart) || !Number.isFinite(pmEnd)) continue;
+    let pos: number;
+    let dist: number;
+    if (clientX < r.left) {
+      pos = pmStart;
+      dist = r.left - clientX;
+    } else if (clientX > r.right) {
+      pos = pmEnd;
+      dist = clientX - r.right;
+    } else {
+      const ratio = (clientX - r.left) / Math.max(1, r.width);
+      pos = pmStart + Math.round(ratio * (pmEnd - pmStart));
+      dist = 0;
+    }
+    if (!best || dist < best.dist) best = { pos, dist };
+  }
+  return best?.pos ?? null;
+}
 
 export interface UsePagesPointerReturn {
   tableInsertButton: Ref<TableInsertButton | null>;
@@ -165,6 +236,26 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
   let scrollFadeTimer: ReturnType<typeof setTimeout> | null = null;
 
   function resolvePos(clientX: number, clientY: number): number | null {
+    // Footnote edit mode: a footnote PM doc has its own position space that
+    // collides with the body's, so resolve strictly within the painted
+    // footnote container — never fall through to body geometry (which returns
+    // BODY positions). Scope the span-snap to the active footnote's element.
+    const fnId = opts.footnoteEditId?.value ?? null;
+    if (fnId != null) {
+      // NOTE: coarse nearest-span snap (not the glyph-accurate findPositionInSpan
+      // path React uses). A precise mid-span caret here exposes a Vue-only
+      // multi-char typing scatter (view state churns between keystrokes); until
+      // that's fixed, keep the coarse snap that types reliably. See bug note
+      // docx-editor-vue-footnote-precise-caret-typing-scatter.md.
+      const els = window.document.elementsFromPoint(clientX, clientY) as Element[];
+      for (const el of els) {
+        const hit = resolveFootnoteHit(el as HTMLElement);
+        if (hit && hit.id === fnId) {
+          return snapToScopedSpan(hit.container, clientX, clientY);
+        }
+      }
+      return null;
+    }
     return resolvePosImpl(opts.pagesRef.value, opts.editorView.value, clientX, clientY);
   }
 
@@ -177,6 +268,11 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
    * if/else "which PM?" branches.
    */
   function activeView(): EditorView | null {
+    // Footnote edit mode wins — its PM doc has its own position space.
+    if (opts.footnoteEditId?.value != null && opts.getFootnoteView) {
+      const fnView = opts.getFootnoteView();
+      if (fnView) return fnView;
+    }
     const hf = hfEdit.value;
     if (hf?.headerFooter && opts.getHfPmView) {
       const v = opts.getHfPmView(hf.headerFooter);
@@ -565,6 +661,65 @@ export function usePagesPointer(opts: UsePagesPointerOptions): UsePagesPointerRe
     if (!body) return;
 
     const target = event.target as HTMLElement;
+
+    // ── Footnote edit-mode carve-out (mirrors React's usePagesPointer) ──
+    // Two cases:
+    //   1. Click inside a painted footnote → enter/switch footnote-edit mode
+    //      for that footnote id and place the caret at the clicked char in
+    //      THAT footnote's hidden view. The footnote view is rebuilt lazily by
+    //      the `footnoteEditId` watch after `setFootnoteEditId` commits, so on
+    //      a fresh entry `getFootnoteView()` is null this tick; a short rAF
+    //      poll places the caret once the view mounts.
+    //   2. Already editing a footnote, click outside any footnote → exit back
+    //      to body editing (caret at the body click site).
+    if (opts.setFootnoteEditId) {
+      const fnHit = resolveFootnoteHit(target);
+      if (fnHit) {
+        event.preventDefault();
+        event.stopPropagation();
+        const entering = fnHit.id !== opts.footnoteEditId?.value;
+        if (entering) opts.setFootnoteEditId(fnHit.id);
+        const placeCaret = (attempt: number) => {
+          const view = opts.getFootnoteView?.() ?? null;
+          if (!view) {
+            if (attempt < 10) requestAnimationFrame(() => placeCaret(attempt + 1));
+            return;
+          }
+          const pos = snapToScopedSpan(fnHit.container, event.clientX, event.clientY);
+          if (pos !== null) {
+            try {
+              const sel = TextSelection.create(view.state.doc, pos);
+              view.dispatch(view.state.tr.setSelection(sel));
+            } catch {
+              // pos may be invalid for the footnote doc; just focus.
+            }
+          }
+          view.focus();
+        };
+        if (entering) requestAnimationFrame(() => placeCaret(0));
+        else placeCaret(0);
+        return;
+      }
+      if (opts.footnoteEditId?.value != null) {
+        // Click landed outside any footnote while one is active → exit
+        // footnote-edit mode and place the body caret where the user clicked.
+        // Can't fall through to the body block below: `activeView()` is still
+        // the footnote view and `resolvePos` is footnote-scoped (returns null
+        // for a body click). Resolve the body position directly, then hand off
+        // via `exitFootnoteToBody`, which defers body focus past the footnote
+        // view teardown (otherwise the destroy-blur steals it).
+        event.preventDefault();
+        const bodyPos = resolvePosImpl(
+          opts.pagesRef.value,
+          opts.editorView.value,
+          event.clientX,
+          event.clientY
+        );
+        if (opts.exitFootnoteToBody) opts.exitFootnoteToBody(bodyPos);
+        else opts.setFootnoteEditId(null);
+        return;
+      }
+    }
 
     // HF mode: clicks OUTSIDE the painted HF area close edit mode and refocus
     // the body PM. The body-PM-selection branch below also falls through, so

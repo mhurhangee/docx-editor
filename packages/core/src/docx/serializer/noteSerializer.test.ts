@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { parseFootnotes, parseEndnotes } from '../footnoteParser';
 import { serializeFootnotes, serializeEndnotes } from './noteSerializer';
+import type { Footnote, Endnote } from '../../types/content';
 
 const ENDNOTES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -73,5 +74,72 @@ describe('noteSerializer — footnotes', () => {
     expect(xml).toContain('<w:continuationSeparator/>');
     expect(xml).toContain('<w:footnoteRef/>');
     expect(xml).toContain('<w:footnotes');
+  });
+});
+
+describe('noteSerializer — auto-insert the ref marker on edited notes', () => {
+  // A note edited in the live editor (Phase 2) routes its content through the
+  // body block parser, which does NOT model `w:footnoteRef`/`w:endnoteRef`. So a
+  // `normal` note rebuilt from `content` can lack the leading auto-number mark.
+  // The serializer must re-insert exactly one marker into the first paragraph,
+  // mirroring SuperDoc's `insertFootnoteRefIntoParagraph` (skip if present).
+
+  test('prepends a single w:footnoteRef when a normal footnote lacks one', () => {
+    const fn: Footnote = {
+      type: 'footnote',
+      id: 3,
+      noteType: 'normal',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'run', content: [{ type: 'text', text: 'Edited footnote.' }] }],
+        },
+      ],
+    };
+    const xml = serializeFootnotes([fn]);
+
+    expect((xml.match(/<w:footnoteRef\/>/g) ?? []).length).toBe(1);
+    // The marker sits in the first paragraph, before the authored text.
+    expect(xml.indexOf('<w:footnoteRef/>')).toBeLessThan(xml.indexOf('Edited footnote.'));
+    // Well-formed: reparses without throwing and keeps the note.
+    expect(parseFootnotes(xml).getFootnote(3)?.noteType).toBe('normal');
+  });
+
+  test('does not add a second w:footnoteRef when one already exists', () => {
+    const xml = serializeFootnotes(parseFootnotes(FOOTNOTES_XML).footnotes);
+    expect((xml.match(/<w:footnoteRef\/>/g) ?? []).length).toBe(1);
+  });
+
+  test('prepends a single w:endnoteRef when a normal endnote lacks one', () => {
+    const en: Endnote = {
+      type: 'endnote',
+      id: 4,
+      noteType: 'normal',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'run', content: [{ type: 'text', text: 'Edited endnote.' }] }],
+        },
+      ],
+    };
+    const xml = serializeEndnotes([en]);
+
+    expect((xml.match(/<w:endnoteRef\/>/g) ?? []).length).toBe(1);
+    expect(xml.indexOf('<w:endnoteRef/>')).toBeLessThan(xml.indexOf('Edited endnote.'));
+  });
+
+  test('does not inject a marker into separator / verbatim notes', () => {
+    const sep: Footnote = {
+      type: 'footnote',
+      id: -1,
+      noteType: 'separator',
+      content: [],
+      verbatimXml:
+        '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>',
+    };
+    const xml = serializeFootnotes([sep]);
+    // Byte-identical verbatim passthrough; no footnoteRef injected.
+    expect(xml).toContain(sep.verbatimXml!);
+    expect(xml).not.toContain('<w:footnoteRef/>');
   });
 });

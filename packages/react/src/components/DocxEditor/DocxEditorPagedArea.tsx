@@ -1,6 +1,6 @@
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import type {
@@ -16,6 +16,8 @@ import {
   computeHfCaretRectFromView,
   computeHfSelectionRectsFromView,
   invalidateHfDomCache,
+  computeFootnoteCaretRectFromView,
+  computeFootnoteSelectionRectsFromView,
 } from '@eigenpal/docx-editor-core/layout-bridge';
 import { applyCellSelectionHighlight } from './internals/domSelection';
 import { extractSelectionState } from '@eigenpal/docx-editor-core/prosemirror';
@@ -315,6 +317,72 @@ export function DocxEditorPagedArea({
     };
   }, [hfEditPosition, hfEditorRef, applyHfOverlay]);
 
+  // ── Footnote caret + selection overlay (Step 4 of footnote-edit unification)
+  // The painted-footnote analogue of the HF overlay above. The actively-edited
+  // footnote's hidden PM holds the selection but the painter is the sole
+  // visible renderer, so the user has no caret unless we draw one over the
+  // painted `.layout-footnote-content[data-footnote-id]`. We resolve that
+  // container by id (footnote PM positions collide across footnotes, so the
+  // DOM walk MUST be scoped to the active container — never page-wide) and
+  // compute caret/selection rects via the footnote-scoped core helpers.
+  const [footnoteEditId, setFootnoteEditId] = useState<number | null>(null);
+  const footnoteViewRef = useRef<EditorView | null>(null);
+  const [footnoteCaretRect, setFootnoteCaretRect] = useState<{
+    top: number;
+    left: number;
+    height: number;
+  } | null>(null);
+  const [footnoteSelectionRects, setFootnoteSelectionRects] = useState<
+    Array<{ top: number; left: number; width: number; height: number }>
+  >([]);
+
+  const applyFootnoteOverlay = useCallback(
+    (view: EditorView, id: number) => {
+      const container = window.document.querySelector<HTMLElement>(
+        `.layout-footnote-content[data-footnote-id="${id}"]`
+      );
+      if (!container) {
+        setFootnoteCaretRect(null);
+        setFootnoteSelectionRects([]);
+        return;
+      }
+      const caret = computeFootnoteCaretRectFromView(view, container);
+      setFootnoteCaretRect(caret ? toHfHostLocal(caret) : null);
+      setFootnoteSelectionRects(
+        computeFootnoteSelectionRectsFromView(view, container).map(toHfHostLocal)
+      );
+    },
+    [toHfHostLocal]
+  );
+
+  // Initial-caret-on-engage + recompute-after-paint, mirroring the HF effect.
+  // When a footnote enters edit mode the hidden PM's click-placed selection is
+  // already set but no transaction may fire, so measure once the painter has
+  // repainted (deterministic `painter:painted` signal + rAF safety) and on
+  // resize. Clears when no footnote is active.
+  useEffect(() => {
+    if (footnoteEditId == null) {
+      setFootnoteCaretRect(null);
+      setFootnoteSelectionRects([]);
+      return;
+    }
+    const measure = () => {
+      const view = footnoteViewRef.current;
+      if (view) applyFootnoteOverlay(view, footnoteEditId);
+    };
+    const pagesEl = window.document.querySelector('.paged-editor__pages') as HTMLElement | null;
+    const onPainted = () => measure();
+    pagesEl?.addEventListener('painter:painted', onPainted);
+    const raf = requestAnimationFrame(measure);
+    const onResize = () => measure();
+    window.addEventListener('resize', onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      pagesEl?.removeEventListener('painter:painted', onPainted);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [footnoteEditId, applyFootnoteOverlay]);
+
   return (
     <>
       <PagedEditor
@@ -365,6 +433,37 @@ export function DocxEditorPagedArea({
           });
           onSelectionChange(extractSelectionState(view.state));
           onHfTransaction?.(rId, view, docChanged);
+        }}
+        onFootnoteEditChange={(id) => {
+          setFootnoteEditId(id);
+          if (id == null) footnoteViewRef.current = null;
+        }}
+        onFootnoteTransaction={(id, view, _docChanged) => {
+          // Footnote analogue of `onHfTransaction`: recompute the painted-
+          // footnote caret/selection overlay after each transaction. Wait for
+          // the painter's `painter:painted` (with a one-shot rAF fallback for
+          // selection-only transactions that skip a layout pass) so the
+          // measurement sees the fresh `data-pm-start` spans.
+          footnoteViewRef.current = view;
+          const pagesEl = window.document.querySelector(
+            '.paged-editor__pages'
+          ) as HTMLElement | null;
+          let painted = false;
+          const apply = () => {
+            if (painted) return;
+            painted = true;
+            applyFootnoteOverlay(view, id);
+          };
+          pagesEl?.addEventListener('painter:painted', apply, { once: true });
+          requestAnimationFrame(() => {
+            if (!painted) {
+              pagesEl?.removeEventListener('painter:painted', apply);
+              apply();
+            }
+          });
+          // Footnote-edit mode keeps the body PM read-only, so the toolbar
+          // selection state should track the footnote view while it's active.
+          onSelectionChange(extractSelectionState(view.state));
         }}
         // Click routing through `onHfPagesMouseDown` was retired; usePagesPointer
         // now routes every HF gesture (click, drag, dblclick, image, hyperlink,
@@ -539,6 +638,60 @@ export function DocxEditorPagedArea({
                   />
                 );
               })}
+            </>,
+            host
+          );
+        })()}
+
+      {/* Footnote caret + selection rects — same portal target + coord model as
+          the HF overlay above (host-local coords, scroll-invariant). Drawn only
+          while a footnote is the active edit surface; cleared on exit via
+          `onFootnoteEditChange(null)`. */}
+      {footnoteEditId != null &&
+        (footnoteCaretRect || footnoteSelectionRects.length > 0) &&
+        (() => {
+          const pagesEl = window.document.querySelector(
+            '.paged-editor__pages'
+          ) as HTMLElement | null;
+          const host = pagesEl?.parentElement as HTMLElement | null;
+          if (!pagesEl || !host) return null;
+          return createPortal(
+            <>
+              {footnoteCaretRect && footnoteSelectionRects.length === 0 && (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: footnoteCaretRect.top,
+                    left: footnoteCaretRect.left,
+                    width: 2,
+                    height: footnoteCaretRect.height,
+                    // Match the body caret (black, dark-mode aware) — footnotes
+                    // are body-like editing, not the HF chrome (which is blue).
+                    background: 'var(--doc-caret, #000)',
+                    pointerEvents: 'none',
+                    zIndex: 11,
+                    animation: 'hf-caret-blink 1.06s steps(1) infinite',
+                  }}
+                />
+              )}
+              {footnoteSelectionRects.map((r, i) => (
+                <div
+                  key={`fn-sel-${i}-${r.top}-${r.left}`}
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: r.top,
+                    left: r.left,
+                    width: r.width,
+                    height: r.height,
+                    // Match the body selection highlight (Google-Docs blue).
+                    background: 'rgba(66, 133, 244, 0.3)',
+                    pointerEvents: 'none',
+                    zIndex: 10,
+                  }}
+                />
+              ))}
             </>,
             host
           );

@@ -45,6 +45,9 @@ function renderMeasuredFootnoteContent(
 ): HTMLElement {
   const container = doc.createElement('div');
   container.className = 'layout-footnote-content';
+  // Each footnote owns its own PM position space, so per-footnote click/caret
+  // routing needs to disambiguate which footnote a painted region belongs to.
+  container.dataset.footnoteId = String(content.id);
   container.style.position = 'relative';
   container.style.width = `${contentWidth}px`;
   container.style.height = `${content.height}px`;

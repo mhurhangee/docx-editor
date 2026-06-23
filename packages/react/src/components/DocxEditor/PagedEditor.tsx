@@ -18,11 +18,11 @@ import React, { useEffect, useRef, useState, useCallback, useMemo, forwardRef, m
 import type { CSSProperties } from 'react';
 import { TextSelection, type EditorState, type Transaction, type Plugin } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import type { Node as PMNode } from 'prosemirror-model';
 
 // Internal components
 import { HiddenProseMirror, type HiddenProseMirrorRef } from './HiddenProseMirror';
 import { HiddenHeaderFooterPMs, type HiddenHeaderFooterPMsRef } from './HiddenHeaderFooterPMs';
+import { HiddenFootnotePM } from './HiddenFootnotePM';
 import { SelectionOverlay } from './overlays/SelectionOverlay';
 import { ImageSelectionOverlay } from './overlays/ImageSelectionOverlay';
 import { DecorationLayer } from './overlays/DecorationLayer';
@@ -65,6 +65,7 @@ import {
   pluginOverlaysStyles,
 } from './internals/styles';
 import { viewportMinHeightPx } from './internals/scrollUtils';
+import { useFootnoteEditState } from './hooks/useFootnoteEditState';
 import { useLayoutPipeline } from './hooks/useLayoutPipeline';
 import { useSelectionOverlay } from './hooks/useSelectionOverlay';
 import { useImageInteractions } from './hooks/useImageInteractions';
@@ -134,6 +135,10 @@ export interface PagedEditorProps {
    * Returns nothing.
    */
   onHfTransaction?: (rId: string, view: EditorView, docChanged: boolean) => void;
+  /** Footnote analogue of `onHfTransaction` — fires per footnote-PM transaction so the parent recomputes the painted-footnote overlay. */
+  onFootnoteTransaction?: (id: number, view: EditorView, docChanged: boolean) => void;
+  /** Fires when footnote-edit mode changes (active footnote id, or null on exit) so the parent clears the overlay / resolves the container. */
+  onFootnoteEditChange?: (id: number | null) => void;
   /** Custom class name. */
   className?: string;
   /** Custom styles. */
@@ -310,6 +315,8 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
       hfEditMode,
       onBodyClick,
       onHfTransaction,
+      onFootnoteTransaction,
+      onFootnoteEditChange,
       className,
       style,
       commentsSidebarOpen = false,
@@ -378,14 +385,16 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
     // State
     const [isFocused, setIsFocused] = useState(false);
 
-    // When HF edit mode engages, the body PM must visually retire — collapse
-    // its selection to a non-rendered cursor, drop `isFocused`, and blur the
-    // PM. Otherwise the user sees TWO carets (one in the painted header, one
-    // in the body) and keystrokes that briefly land on the body before the
-    // HF view reclaims focus get inserted into the body doc. Symmetric cleanup
-    // when HF edit mode exits — restore body focus so typing flows back.
+    // Painter PM-doc resolvers (`getHfPmDoc`/`getFootnotePmDoc` feed the layout pipeline) + HF/footnote-edit state; `<HiddenFootnotePM>` consumes it.
+    const { getHfPmDoc, getHfView, footnoteEditId, setFootnoteEditId, getFootnoteView, exitFootnoteToBody, hiddenFootnotePMRef, getFootnotePmDoc } = useFootnoteEditState({ document, hiddenHfPMsRef, hfEditMode, bodyPmRef: hiddenPMRef, setIsFocused, onFootnoteEditChange }); // prettier-ignore
+
+    // When HF OR footnote edit mode engages, the body PM must visually retire —
+    // collapse its selection to a non-rendered cursor, drop `isFocused`, and blur
+    // the PM. Otherwise the user sees TWO carets (painted header/footnote + body)
+    // and stray keystrokes land in the body doc. Body focus is restored on the
+    // next body click.
     useEffect(() => {
-      if (hfEditMode) {
+      if (hfEditMode || footnoteEditId != null) {
         const view = hiddenPMRef.current?.getView();
         if (view) {
           try {
@@ -399,7 +408,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         }
         setIsFocused(false);
       }
-    }, [hfEditMode]);
+    }, [hfEditMode, footnoteEditId]);
 
     // Image selection state — `isImageInteractingRef` lives at the parent so
     // useSelectionOverlay can read it (to gate the deferred image-info clear)
@@ -408,33 +417,6 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
 
     // Selection gate - ensures selection renders only when layout is current
     const syncCoordinator = useMemo(() => new LayoutSelectionGate(), []);
-
-    // Persistent hidden HF PM lookup — phase 1 of HF editing unification.
-    // Walks `document.package.headers`/`footers` to find the rId for this
-    // HeaderFooter instance, then asks the HiddenHeaderFooterPMs ref for
-    // its current PM doc. Returns null when no PM is mounted (cold boot
-    // before the effect runs) so the pipeline falls back to the Document
-    // model path. Stable identity per `document` so the layout pipeline
-    // doesn't re-run on every render.
-    const getHfPmDoc = useCallback(
-      (hf: HeaderFooter): PMNode | null => {
-        const ref = hiddenHfPMsRef.current;
-        if (!ref) return null;
-        const pkg = document?.package;
-        if (!pkg) return null;
-        const findRid = (bag?: Map<string, HeaderFooter>): string | null => {
-          if (!bag) return null;
-          for (const [rId, value] of bag) {
-            if (value === hf) return rId;
-          }
-          return null;
-        };
-        const rId = findRid(pkg.headers) ?? findRid(pkg.footers);
-        if (!rId) return null;
-        return ref.getView(rId)?.state.doc ?? null;
-      },
-      [document]
-    );
 
     // Layout pipeline — owns layout/blocks/measures state, the rAF-coalesced
     // scheduler, scroll-restore plumbing, the painter, and the page-count
@@ -460,6 +442,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
       firstPageHeaderContent,
       firstPageFooterContent,
       getHfPmDoc,
+      getFootnotePmDoc,
       pageGap,
       zoom,
       resolvedCommentIds,
@@ -570,20 +553,14 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
     } = usePagesPointer({
       pagesContainerRef,
       hiddenPMRef,
-      // Resolve the active HF EditorView for the current `hfEditMode` slot
-      // so usePagesPointer can route every gesture (single-click, drag,
-      // multi-click, image-select, hyperlink, context menu) through the
-      // HF PM instead of the body PM.
-      getHfView: useCallback(() => {
-        const hfRef = hiddenHfPMsRef.current;
-        if (!hfRef) return null;
-        const sp = document?.package?.document?.finalSectionProperties;
-        const refs = hfEditMode === 'header' ? sp?.headerReferences : sp?.footerReferences;
-        const refEntry =
-          refs?.find((r) => r.type === 'default') ?? refs?.find((r) => r.type === 'first') ?? null;
-        if (!refEntry?.rId) return null;
-        return hfRef.getView(refEntry.rId);
-      }, [hfEditMode, document]),
+      // Resolve the active HF EditorView for the current `hfEditMode` slot so
+      // usePagesPointer routes every gesture through the HF PM. Lives in the
+      // hook to keep PagedEditor under its line cap.
+      getHfView,
+      getFootnoteView,
+      footnoteEditId,
+      setFootnoteEditId,
+      exitFootnoteToBody,
       layout,
       blocks,
       measures,
@@ -620,8 +597,10 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         // the persistent hidden HF PMs (mounted off-screen as siblings of
         // `.layout-page-content`), don't redirect to the body PM — that
         // would steal focus from the HF editor the user just opened.
-        // `data-hf-r-id` is set on the host div by HiddenHeaderFooterPMs.
-        if (target.closest('[data-hf-r-id]')) return;
+        // `data-hf-r-id` is set on the host div by HiddenHeaderFooterPMs;
+        // `data-footnote-pm-id` by HiddenFootnotePM. Don't redirect to the
+        // body PM when focus lands on either secondary editor's host.
+        if (target.closest('[data-hf-r-id]') || target.closest('[data-footnote-pm-id]')) return;
         hiddenPMRef.current?.focus();
         setIsFocused(true);
       },
@@ -678,7 +657,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         // `isFocused()` check would return false while HF is focused,
         // causing the body PM to grab every keystroke after the first.
         const target = e.target as HTMLElement | null;
-        if (target?.closest('[data-hf-r-id]')) return;
+        if (target?.closest('[data-hf-r-id]') || target?.closest('[data-footnote-pm-id]')) return;
         // Don't hijack keystrokes typed into the hyperlink popup's inputs —
         // refocusing the body PM here would steal focus mid-type and route
         // keys (e.g. space) into the document instead of the input.
@@ -830,10 +809,10 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
           document={document}
           styles={styles}
           widthPx={contentWidth}
-          // When HF mode is active, the body PM is functionally retired —
-          // marking it readOnly stops keystrokes / input events from being
-          // applied to the body doc even if focus briefly slips to it.
-          readOnly={readOnly || !!hfEditMode}
+          // When HF or footnote mode is active, the body PM is functionally
+          // retired — marking it readOnly stops keystrokes / input events from
+          // being applied to the body doc even if focus briefly slips to it.
+          readOnly={readOnly || !!hfEditMode || footnoteEditId != null}
           onTransaction={handleTransaction}
           onSelectionChange={handleSelectionChange}
           externalPlugins={externalPlugins}
@@ -860,6 +839,27 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
               if (bodyState) runLayoutPipeline(bodyState);
             }
             onHfTransaction?.(rId, view, docChanged);
+          }}
+        />
+
+        {/* Lazy single hidden PM for the actively-edited footnote */}
+        <HiddenFootnotePM
+          ref={hiddenFootnotePMRef}
+          activeFootnoteId={footnoteEditId}
+          document={document}
+          styles={styles}
+          theme={_theme}
+          isSuggesting={isSuggesting}
+          author={author}
+          defaultTabStopTwips={document?.package?.settings?.defaultTabStop ?? null}
+          onTransaction={(id, view, docChanged) => {
+            // Re-layout only on doc changes (the footnote painter reads the live
+            // doc via `getFootnotePmDoc`, so a body relayout repaints it).
+            if (docChanged) {
+              const bodyState = hiddenPMRef.current?.getState();
+              if (bodyState) runLayoutPipeline(bodyState);
+            }
+            if (id != null) onFootnoteTransaction?.(id, view, docChanged); // recompute parent overlay
           }}
         />
 

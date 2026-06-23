@@ -25,6 +25,7 @@ import type {
   TextRun,
 } from '../layout-engine/types';
 import { layoutDocument, type LayoutOptions } from '../layout-engine';
+import type { Node as PMNode } from 'prosemirror-model';
 import type { Document, Footnote, StyleDefinitions, Theme } from '../types/document';
 import type { FootnoteRenderItem } from '../layout-painter';
 import { footnoteToProseDoc } from '../prosemirror/conversion/toProseDoc';
@@ -338,6 +339,14 @@ export type ConvertFootnoteOptions = {
    * inside footnotes honor the same tab grid.
    */
   defaultTabStopTwips?: number | null;
+  /**
+   * Footnote-edit unification: the live persistent footnote PM doc for an id,
+   * or null/undefined to re-parse `footnote.content`. Mirrors `getHfPmDoc` in
+   * the HF pipeline — when a footnote is being edited, the hidden EditorView's
+   * doc is the source of truth, so layout reads from it instead of the static
+   * stored content.
+   */
+  getFootnotePmDoc?: (footnoteId: number) => PMNode | null | undefined;
 };
 
 /**
@@ -354,11 +363,19 @@ export function convertFootnoteToContent(
   contentWidth: number,
   options: ConvertFootnoteOptions
 ): FootnoteContent {
-  const pmDoc = footnoteToProseDoc(footnote.content, {
-    styles: options.styles ?? undefined,
-    theme: options.theme ?? null,
-    defaultTabStopTwips: options.defaultTabStopTwips ?? null,
-  });
+  // Footnote-edit unification: when a live persistent PM doc is mounted for
+  // this footnote, it is the source of truth — use it directly instead of
+  // re-parsing the stored content (mirrors `getHfPmDoc` in the HF pipeline).
+  // Everything downstream (toFlowBlocks → applyFootnotePresentation → measure)
+  // is identical regardless of which doc fed it.
+  const live = options.getFootnotePmDoc?.(footnote.id);
+  const pmDoc =
+    live ??
+    footnoteToProseDoc(footnote.content, {
+      styles: options.styles ?? undefined,
+      theme: options.theme ?? null,
+      defaultTabStopTwips: options.defaultTabStopTwips ?? null,
+    });
   const rawBlocks = toFlowBlocks(pmDoc, { theme: options.theme ?? undefined });
   const blocks = applyFootnotePresentation(rawBlocks, displayNumber);
 

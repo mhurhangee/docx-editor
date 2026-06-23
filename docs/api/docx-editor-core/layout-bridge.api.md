@@ -99,6 +99,21 @@ export function collectFootnoteRefs(blocks: FlowBlock[]): FootnoteRefLocation[];
 export function columnWidthForSection(config: SectionLayoutConfig): number;
 
 // @public
+export function computeFootnoteCaretRectFromView(view: EditorView, container: HTMLElement): {
+    top: number;
+    left: number;
+    height: number;
+} | null;
+
+// @public
+export function computeFootnoteSelectionRectsFromView(view: EditorView, container: HTMLElement): Array<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+}>;
+
+// @public
 export function computeHfCaretRectFromView(view: EditorView, section: 'header' | 'footer', doc?: globalThis.Document): {
     top: number;
     left: number;
@@ -138,6 +153,7 @@ export type ConvertFootnoteOptions = {
     theme?: Theme | null;
     measureBlocks: MeasureBlocksFn;
     defaultTabStopTwips?: number | null;
+    getFootnotePmDoc?: (footnoteId: number) => Node_2 | null | undefined;
 };
 
 // @public
@@ -249,6 +265,9 @@ export function findBodyPmSpans(container: ParentNode): HTMLElement[];
 
 // @public
 export function findCharacterAtX(x: number, charWidths: number[]): number;
+
+// @public
+export function findPositionInSpan(spanEl: HTMLElement, clientX: number, _clientY: number): number | null;
 
 // @public (undocumented)
 export interface FloatingExclusionRect {

@@ -33,6 +33,7 @@ export interface ComputeLayoutInputs {
     firstPageHeaderContent: HeaderFooter | null | undefined;
     // (undocumented)
     footerContent: HeaderFooter | null | undefined;
+    getFootnotePmDoc?: (footnoteId: number) => Node_2 | null | undefined;
     getHfPmDoc: (hf: HeaderFooter) => Node_2 | null | undefined;
     headerContent: HeaderFooter | null | undefined;
     // (undocumented)

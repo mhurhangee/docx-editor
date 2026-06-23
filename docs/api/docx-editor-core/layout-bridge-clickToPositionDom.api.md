@@ -46,6 +46,9 @@ export interface DomSelectionRect {
     y: number;
 }
 
+// @public
+export function findPositionInSpan(spanEl: HTMLElement, clientX: number, _clientY: number): number | null;
+
 // @public (undocumented)
 export function getCaretPositionFromDom(container: HTMLElement, pmPos: number, overlayRect: DOMRect, zoom?: number): DomCaretPosition | null;
 

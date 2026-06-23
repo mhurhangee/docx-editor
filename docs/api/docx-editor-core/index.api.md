@@ -262,6 +262,7 @@ export type ConvertFootnoteOptions = {
     theme?: Theme | null;
     measureBlocks: MeasureBlocksFn;
     defaultTabStopTwips?: number | null;
+    getFootnotePmDoc?: (footnoteId: number) => Node_2 | null | undefined;
 };
 
 // @public (undocumented)

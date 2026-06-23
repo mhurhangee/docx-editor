@@ -21,11 +21,89 @@
  */
 
 import type { Footnote, Endnote } from '../../types/content';
-import type { BlockContent } from '../../types/document';
+import type { BlockContent, Paragraph, Run } from '../../types/document';
 import { serializeBlockContent } from './documentSerializer';
 import { OOXML_NAMESPACES, MC_IGNORABLE } from './xmlUtils';
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+
+/**
+ * Does any run in this paragraph already carry the auto-number mark
+ * (`w:footnoteRef` / `w:endnoteRef`)? Runs can be wrapped in tracked-change
+ * containers (`w:ins`/`w:del`), but the leading marker is virtually always a
+ * bare run on the first paragraph — a shallow scan of direct + tracked-wrapper
+ * runs matches Word's documents and SuperDoc's `paragraphHasFootnoteRef`.
+ */
+function paragraphHasNoteRefMark(
+  para: Paragraph,
+  markType: 'footnoteRefMark' | 'endnoteRefMark'
+): boolean {
+  const runHasMark = (run: Run): boolean => run.content.some((c) => c.type === markType);
+  for (const item of para.content) {
+    if (item.type === 'run' && runHasMark(item)) return true;
+    if ((item.type === 'insertion' || item.type === 'deletion') && Array.isArray(item.content)) {
+      for (const inner of item.content) {
+        if (inner.type === 'run' && runHasMark(inner)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Build the synthetic auto-number marker run. Mirrors SuperDoc's
+ * `insertFootnoteRefIntoParagraph`: an `rStyle` of the reference char style
+ * plus superscript `vertAlign`, carrying the bare `w:footnoteRef`/`w:endnoteRef`
+ * element. The reference char style name is the Word default
+ * (`FootnoteReference` / `EndnoteReference`).
+ */
+function makeNoteRefMarkRun(elementName: 'footnote' | 'endnote'): Run {
+  return {
+    type: 'run',
+    formatting: {
+      styleId: elementName === 'footnote' ? 'FootnoteReference' : 'EndnoteReference',
+      vertAlign: 'superscript',
+    },
+    content: [{ type: elementName === 'footnote' ? 'footnoteRefMark' : 'endnoteRefMark' }],
+  };
+}
+
+/**
+ * Ensure a `normal` note's serialized content carries the leading auto-number
+ * mark. The body block parser (`parseNoteBlockContent`) does not model
+ * `w:footnoteRef`/`w:endnoteRef`, so a note edited in the live editor and
+ * rebuilt from `content` can lack it — Word still renders such a note, but the
+ * number is gone. Prepend a marker run to the first paragraph's content when
+ * none of the note's paragraphs already has one (skip-if-present, matching
+ * SuperDoc). Returns a shallow-cloned content array; the input is left pure.
+ */
+function withNoteRefMark(
+  elementName: 'footnote' | 'endnote',
+  content: readonly BlockContent[]
+): BlockContent[] {
+  const markType = elementName === 'footnote' ? 'footnoteRefMark' : 'endnoteRefMark';
+  const firstParaIndex = content.findIndex((b) => b.type === 'paragraph');
+
+  // Already present anywhere in the note → leave untouched.
+  for (const block of content) {
+    if (block.type === 'paragraph' && paragraphHasNoteRefMark(block, markType)) {
+      return content as BlockContent[];
+    }
+  }
+
+  const markRun = makeNoteRefMarkRun(elementName);
+  if (firstParaIndex === -1) {
+    // No paragraph at all (degenerate edited note) — synthesize one so the
+    // marker has a home, matching SuperDoc's unshift-a-paragraph fallback.
+    return [{ type: 'paragraph', content: [markRun] } as Paragraph, ...(content as BlockContent[])];
+  }
+
+  const firstPara = content[firstParaIndex] as Paragraph;
+  const patched: Paragraph = { ...firstPara, content: [markRun, ...firstPara.content] };
+  const out = [...(content as BlockContent[])];
+  out[firstParaIndex] = patched;
+  return out;
+}
 
 /** Serialize one note element (footnote or endnote share identical structure). */
 function serializeNote(elementName: 'footnote' | 'endnote', note: Footnote | Endnote): string {
@@ -54,7 +132,17 @@ function serializeNote(elementName: 'footnote' | 'endnote', note: Footnote | End
   }
   attrs.push(`w:id="${note.id}"`);
 
-  const body = note.content.map((block) => serializeBlockContent(block as BlockContent)).join('');
+  // Re-insert the leading auto-number mark for normal notes that lost it on the
+  // body-parse round-trip (the parser doesn't model w:footnoteRef/w:endnoteRef).
+  // Separator / continuation notes keep their own special marks and must not
+  // gain an auto-number — they're already excluded by the verbatim gate above
+  // and by the noteType check here.
+  const content =
+    !note.noteType || note.noteType === 'normal'
+      ? withNoteRefMark(elementName, note.content as BlockContent[])
+      : (note.content as BlockContent[]);
+
+  const body = content.map((block) => serializeBlockContent(block)).join('');
 
   return `<w:${elementName} ${attrs.join(' ')}>${body}</w:${elementName}>`;
 }

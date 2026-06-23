@@ -127,12 +127,20 @@
             :style="rulerRowStyle"
           >
             <HorizontalRuler
-              :section-props="currentSectionProps" :zoom="zoom" :editable="!readOnly"
-              :indent-left="rulerIndents.indentLeft" :indent-right="rulerIndents.indentRight"
-              :first-line-indent="rulerIndents.firstLineIndent" :hanging-indent="rulerIndents.hangingIndent" :tab-stops="rulerIndents.tabStops"
-              @left-margin-change="handleLeftMarginChange" @right-margin-change="handleRightMarginChange"
-              @indent-left-change="handleIndentLeftChange" @indent-right-change="handleIndentRightChange"
-              @first-line-indent-change="handleFirstLineIndentChange" @tab-stop-remove="handleTabStopRemove"
+              :section-props="currentSectionProps"
+              :zoom="zoom"
+              :editable="!readOnly"
+              :indent-left="rulerIndents.indentLeft"
+              :indent-right="rulerIndents.indentRight"
+              :first-line-indent="rulerIndents.firstLineIndent"
+              :hanging-indent="rulerIndents.hangingIndent"
+              :tab-stops="rulerIndents.tabStops"
+              @left-margin-change="handleLeftMarginChange"
+              @right-margin-change="handleRightMarginChange"
+              @indent-left-change="handleIndentLeftChange"
+              @indent-right-change="handleIndentRightChange"
+              @first-line-indent-change="handleFirstLineIndentChange"
+              @tab-stop-remove="handleTabStopRemove"
             />
           </div>
 
@@ -149,8 +157,11 @@
           >
             <div v-if="showRuler && currentSectionProps" class="docx-editor-vue__vertical-ruler">
               <VerticalRuler
-                :section-props="currentSectionProps" :zoom="zoom" :editable="!readOnly"
-                @top-margin-change="handleTopMarginChange" @bottom-margin-change="handleBottomMarginChange"
+                :section-props="currentSectionProps"
+                :zoom="zoom"
+                :editable="!readOnly"
+                @top-margin-change="handleTopMarginChange"
+                @bottom-margin-change="handleBottomMarginChange"
               />
             </div>
             <div
@@ -206,6 +217,14 @@
               zIndex: 9999,
               animation: 'hf-caret-blink 1.06s steps(1) infinite',
             }"
+          />
+
+          <!-- Footnote caret + selection rects over the actively-edited painted
+               footnote (parity with the HF overlay above). -->
+          <FootnoteOverlay
+            :active="footnoteEditId != null"
+            :caret-rect="footnoteCaretRect"
+            :selection-rects="footnoteSelectionRects"
           />
 
           <ImageSelectionOverlay
@@ -402,6 +421,7 @@ import CommentMarginMarkers from './CommentMarginMarkers.vue';
 import MaterialSymbol from './ui/MaterialSymbol.vue';
 import PageIndicator from './PageIndicator.vue';
 import InlineHeaderFooterEditor from './InlineHeaderFooterEditor.vue';
+import FootnoteOverlay from './FootnoteOverlay.vue';
 import ContentControlWidgets from './ContentControlWidgets.vue';
 import HorizontalRuler from './ui/HorizontalRuler.vue';
 import VerticalRuler from './ui/VerticalRuler.vue';
@@ -429,6 +449,7 @@ import { useImageActions } from '../composables/useImageActions';
 import { useContextMenus } from '../composables/useContextMenus';
 import { usePagesPointer } from '../composables/usePagesPointer';
 import { useSelectionSync } from '../composables/useSelectionSync';
+import { useFootnoteOverlay } from '../composables/useFootnoteOverlay';
 import { useMenuActions } from '../composables/useMenuActions';
 import { useDocumentLifecycle } from '../composables/useDocumentLifecycle';
 import { useDocxEditorRefApi } from '../composables/useDocxEditorRefApi';
@@ -569,6 +590,11 @@ const {
   syncHfPMs,
   setHfTransactionListener,
   setDocument,
+  footnoteEditId,
+  setFootnoteEditId,
+  getFootnoteView,
+  exitFootnoteToBody,
+  setFootnoteTransactionListener,
 } = useDocxEditor({
   hiddenContainer: hiddenPmRef,
   pagesContainer: pagesRef,
@@ -685,9 +711,13 @@ const activeHfView = computed<EditorView | null>(() =>
   hfEdit.value?.headerFooter ? (getHfPmView(hfEdit.value.headerFooter) ?? null) : null
 );
 
-// Interactive toolbar formatting targets the edited header/footer, else body (#749).
+// Interactive toolbar formatting targets the active edit surface: footnote
+// first, then header/footer, else body (#749 parity).
 const activeFormattingView = computed<EditorView | null>(
-  () => activeHfView.value ?? editorView.value
+  () =>
+    (footnoteEditId.value != null ? getFootnoteView() : null) ??
+    activeHfView.value ??
+    editorView.value
 );
 
 // Registered in onMounted because `hfEdit` is destructured later in this script setup (TDZ).
@@ -771,12 +801,25 @@ const RULER_WIDTH = 20;
 const DEFAULT_PAGE_WIDTH = 816;
 const minLayoutWidth = computed(() => {
   void stateTick.value;
-  const outlineLeftAllowance = (showOutline.value ? OUTLINE_RESERVED_SPACE : props.showOutlineButton ? OUTLINE_BUTTON_RESERVED_SPACE : 20) + (props.showRuler && (showOutline.value || props.showOutlineButton) ? RULER_WIDTH : 0);
+  const outlineLeftAllowance =
+    (showOutline.value
+      ? OUTLINE_RESERVED_SPACE
+      : props.showOutlineButton
+        ? OUTLINE_BUTTON_RESERVED_SPACE
+        : 20) +
+    (props.showRuler && (showOutline.value || props.showOutlineButton) ? RULER_WIDTH : 0);
   const doc = getDocument();
   const docBody = doc?.package?.document;
-  const sectionPageWidths = [docBody?.finalSectionProperties?.pageWidth, ...(docBody?.sections?.map((s) => s.properties?.pageWidth) ?? [])].filter((w): w is number => typeof w === 'number' && w > 0);
-  const maxPageWidthPx = sectionPageWidths.length ? Math.round(Math.max(...sectionPageWidths) / 15) : DEFAULT_PAGE_WIDTH;
-  return 2 * outlineLeftAllowance + maxPageWidthPx + (showSidebar.value ? SIDEBAR_DOCUMENT_SHIFT * 2 : 0);
+  const sectionPageWidths = [
+    docBody?.finalSectionProperties?.pageWidth,
+    ...(docBody?.sections?.map((s) => s.properties?.pageWidth) ?? []),
+  ].filter((w): w is number => typeof w === 'number' && w > 0);
+  const maxPageWidthPx = sectionPageWidths.length
+    ? Math.round(Math.max(...sectionPageWidths) / 15)
+    : DEFAULT_PAGE_WIDTH;
+  return (
+    2 * outlineLeftAllowance + maxPageWidthPx + (showSidebar.value ? SIDEBAR_DOCUMENT_SHIFT * 2 : 0)
+  );
 });
 
 // When the comments sidebar opens, shift the pages container (NOT the
@@ -787,7 +830,11 @@ const pagesContainerStyle = computed(() => {
   const parts: string[] = [];
   if (showSidebar.value) parts.push(`translateX(-${SIDEBAR_DOCUMENT_SHIFT}px)`);
   if (zoom.value !== 1) parts.push(`scale(${zoom.value})`);
-  return { transform: parts.length > 0 ? parts.join(' ') : undefined, transformOrigin: 'top center', transition: 'transform 0.2s ease' };
+  return {
+    transform: parts.length > 0 ? parts.join(' ') : undefined,
+    transformOrigin: 'top center',
+    transition: 'transform 0.2s ease',
+  };
 });
 
 const rulerRowStyle = computed(() => ({
@@ -802,7 +849,9 @@ const pageWidthPx = computed(() => {
   return twipsToPixels(sp?.pageWidth ?? 12240) * zoom.value;
 });
 
-const resolvedCommentIds = computed(() => new Set(comments.value.filter(c => c.parentId == null && c.done).map(c => c.id)));
+const resolvedCommentIds = computed(
+  () => new Set(comments.value.filter((c) => c.parentId == null && c.done).map((c) => c.id))
+);
 
 const bookmarkOptions = computed(() => {
   void stateTick.value;
@@ -1029,6 +1078,10 @@ const {
   syncHfPMs,
   getHfPmView,
   setDocument,
+  getFootnoteView,
+  footnoteEditId,
+  setFootnoteEditId,
+  exitFootnoteToBody,
 });
 
 const {
@@ -1123,7 +1176,9 @@ function updateSelectionOverlay() {
   selectionSync.updateSelectionOverlay();
 }
 
-const isHfEditing = computed(() => hfEdit.value !== null);
+// Suppress the body caret/selection overlay while a header/footer OR footnote
+// is the active edit surface (each draws its own caret; body must retire).
+const isHfEditing = computed(() => hfEdit.value !== null || footnoteEditId.value != null);
 const selectionSync = useSelectionSync({
   editorView,
   hiddenContainer: hiddenPmRef,
@@ -1132,6 +1187,18 @@ const selectionSync = useSelectionSync({
   selectedImage,
   isHfEditing,
   imageInteracting,
+});
+
+// Footnote caret + selection overlay (parity with the HF overlay). Built after
+// `selectionSync` since it re-renders the body overlay on engage/exit.
+const { footnoteCaretRect, footnoteSelectionRects } = useFootnoteOverlay({
+  footnoteEditId,
+  getFootnoteView,
+  setFootnoteTransactionListener,
+  editorView,
+  pagesRef,
+  stateTick,
+  updateSelectionOverlay,
 });
 
 // Drive the overlay through the layout gate (mirrors DecorationLayer): the

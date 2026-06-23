@@ -253,9 +253,12 @@ export interface UseDocxEditorReturn {
     documentFonts: Ref<FontOption[]>;
     editorState: ShallowRef<EditorState | null>;
     editorView: ShallowRef<EditorView | null>;
+    exitFootnoteToBody: (pos: number | null) => void;
     focus: () => void;
+    footnoteEditId: Ref<number | null>;
     getCommands: () => CommandMap;
     getDocument: () => Document_2 | null;
+    getFootnoteView: () => EditorView | null;
     getHfPmView: (hf: HeaderFooter) => EditorView | null;
     getHfPmViews: () => Map<string, EditorView>;
     isReady: Ref<boolean>;
@@ -266,6 +269,8 @@ export interface UseDocxEditorReturn {
     reLayout: () => void;
     save: () => Promise<Blob | null>;
     setDocument: (doc: Document_2) => void;
+    setFootnoteEditId: (id: number | null) => void;
+    setFootnoteTransactionListener: (cb: ((id: number, view: EditorView, docChanged: boolean) => void) | null) => void;
     setHfTransactionListener: (cb: ((rId: string, view: EditorView, docChanged: boolean) => void) | null) => void;
     syncHfPMs: () => void;
 }
