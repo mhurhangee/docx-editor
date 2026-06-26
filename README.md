@@ -1,3 +1,7 @@
+> 📦 Archive — not maintained. A preserved copy of Eigenpal's @eigenpal/docx-editor, captured after the project went dark in June 2026 (both the repo and docx-editor.dev went offline). Forked from sorenlouv/docx-editor — the most recent surviving fork I could find of the original. The package versions here are v1.9.0, matching the last release still published on npm (@eigenpal/docx-editor-core / -react / -agents / -i18n). Apache-2.0 licensed as per original repo. Kept read-only for archival/reference; nothing is changed here.
+
+---
+
 <p align="center">
   <a href="https://www.docx-editor.dev/">
     <img src="./.github/assets/header.png" alt="DOCX Editor — .docx in, .docx out. Open source, agent ready, client-side." width="500" />
